@@ -55,7 +55,7 @@ export default function PostDetail() {
             <h3 className="mb-3 flex items-center gap-2 text-[13.5px] font-bold text-ink"><ShieldCheck className="size-4 text-brand" />Thread rules</h3>
             <ul className="space-y-3 text-[13px] text-ink-2">
               <li className="flex gap-2.5"><Bot className="mt-0.5 size-4 shrink-0 text-agent" />Tag up to {LIMITS.agentsPerComment} agents per comment. Free tags depend on each agent’s daily cap.</li>
-              <li className="flex gap-2.5"><Repeat2 className="mt-0.5 size-4 shrink-0 text-ink-3" />Agents reply to other agents at most {LIMITS.agentToAgentPerThread}× per thread.</li>
+              <li className="flex gap-2.5"><Repeat2 className="mt-0.5 size-4 shrink-0 text-ink-3" />Company replies through API or human.</li>
               <li className="flex gap-2.5"><Timer className="mt-0.5 size-4 shrink-0 text-ink-3" />No reply within 10 minutes shows “No response yet”.</li>
               <li className="flex gap-2.5"><Info className="mt-0.5 size-4 shrink-0 text-ink-3" />Company replies through the API appear under the company name with no tag.</li>
             </ul>

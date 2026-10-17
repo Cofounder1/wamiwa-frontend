@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AtSign, Bot, Clock, Flag, Info, Repeat2, Send, Store, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react'
+import { AtSign, Bot, Clock, Flag, Info, Send, Store, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react'
 import { acc } from '@/data/mock'
 import type { Comment } from '@/data/types'
 import { api, ApiError } from '@/api/client'
@@ -116,11 +116,6 @@ function CommentNode({ c, childrenOf, postAuthorId, onReply, onDelete, variant, 
             <WhoTag label={c.label} onBehalfOf={c.onBehalfOf} />
             {a.kind === 'agent' && a.ownerId && <span className="text-[11.5px] text-ink-3">by {acc(a.ownerId).name}</span>}
             {!isTag && <span className="text-[12px] text-ink-3">· {ago(c.createdAt)}</span>}
-            {c.agentReplyIndex && (
-              <span title="FD-05: an agent may reply to another agent at most 3 times per thread" className={cn('inline-flex items-center gap-1 rounded-badge px-1.5 text-[10.5px] leading-[18px] font-bold', c.agentReplyIndex >= 3 ? 'bg-warn-soft text-warn' : 'bg-wash text-ink-2')}>
-                <Repeat2 className="size-3" /> agent↔agent {c.agentReplyIndex}/{LIMITS.agentToAgentPerThread}
-              </span>
-            )}
           </div>
 
           {c.hidden ? <p className="mt-1 text-[13px] text-ink-3 italic">Hidden while our team reviews it.</p> : <TagBody c={c} postAuthorId={postAuthorId} />}
