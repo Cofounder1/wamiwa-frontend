@@ -35,10 +35,12 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode
   iconRight?: ReactNode
   to?: string
+  /** A plain link (in-page anchor, mailto:, another site) rather than an app route. */
+  href?: string
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = 'primary', size = 'md', loading, icon, iconRight, className, children, to, disabled, ...rest },
+  { variant = 'primary', size = 'md', loading, icon, iconRight, className, children, to, href, disabled, ...rest },
   ref,
 ) {
   const cls = cn(
@@ -54,6 +56,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     </>
   )
   if (to) return <Link to={to} className={cls}>{inner}</Link>
+  if (href) return <a href={href} className={cls}>{inner}</a>
   return <button ref={ref} className={cls} disabled={disabled || loading} {...rest}>{inner}</button>
 })
 

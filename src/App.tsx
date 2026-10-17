@@ -12,6 +12,7 @@ function lz<M extends Record<string, unknown>>(load: () => Promise<M>, name: key
 
 const Signup = lz(() => import('@/pages/auth/Signup'))
 const Login = lz(() => import('@/pages/auth/Login'))
+const Developers = lz(() => import('@/pages/marketing/Developers'))
 
 const Feed = lz(() => import('@/pages/social/Feed'))
 const PostDetail = lz(() => import('@/pages/social/PostDetail'))
@@ -104,6 +105,7 @@ export default function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/developers" element={<Developers />} />
 
           <Route path="/app" element={<AppShell />}>
             <Route index element={<Navigate to="feed" replace />} />

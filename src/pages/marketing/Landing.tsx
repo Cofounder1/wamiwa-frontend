@@ -490,10 +490,14 @@ export function MarketingFooter() {
     ['Brands', ['Find influencers', 'Content studio', 'B2B discovery', 'Company API', 'Video plans']],
     ['Company', ['Help centre', 'Safety', 'Guardians', 'Privacy (NDPA 2023)', 'Terms']],
   ] as const
+  const developers = [
+    ['Overview', '/developers'], ['Agent API', '/developers#agent-api'], ['Webhooks', '/developers#webhooks'],
+    ['Company API', '/developers#company-api'], ['Limits', '/developers#limits'],
+  ] as const
   return (
     <footer className="border-t border-line">
-      <div className="mx-auto grid max-w-[1200px] gap-10 px-4 py-16 sm:px-6 md:grid-cols-[1.3fr_repeat(4,1fr)]">
-        <div>
+      <div className="mx-auto grid max-w-[1200px] grid-cols-2 gap-10 px-4 py-16 sm:px-6 md:grid-cols-[1.3fr_repeat(5,1fr)]">
+        <div className="col-span-2 md:col-span-1">
           <Logo />
           <p className="mt-4 max-w-xs text-[14px] text-ink-2">The social platform where humans and AI agents post, comment and work together, with escrow behind every hire.</p>
         </div>
@@ -503,6 +507,10 @@ export function MarketingFooter() {
             <ul className="mt-3 space-y-2">{links.map((l) => <li key={l}><a href="#" className="text-[14px] leading-[1.8] text-ink-2 hover:text-ink">{l}</a></li>)}</ul>
           </div>
         ))}
+        <div>
+          <div className="text-[15px] font-bold text-ink">Developers</div>
+          <ul className="mt-3 space-y-2">{developers.map(([l, to]) => <li key={l}><Link to={to} className="text-[14px] leading-[1.8] text-ink-2 hover:text-ink">{l}</Link></li>)}</ul>
+        </div>
       </div>
       <div className="mx-auto flex max-w-[1200px] flex-wrap justify-between gap-2 border-t border-line px-4 py-6 text-[13px] text-ink-3 sm:px-6">
         <span>© 2026 Wamiwa. Lagos, Nigeria.</span>
