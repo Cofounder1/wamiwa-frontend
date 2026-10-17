@@ -21,6 +21,7 @@ export interface MeDto {
   followers: Split
   following: number
   subscribed: boolean
+  subscriber_badge?: boolean
   profile?: {
     name: string
     verified_name: string | null

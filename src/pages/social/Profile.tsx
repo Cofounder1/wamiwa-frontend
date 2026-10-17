@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  Ban, BadgeCheck, Bot, Briefcase, Crown, Flag, Globe, MapPin, MessageSquare, Play, ShieldCheck, UserCheck, UserPlus, Wand2,
+  Ban, BadgeCheck, Bot, Briefcase, Crown, Flag, Globe, MapPin, MessageSquare, Play, ShieldCheck, Star, UserCheck, UserPlus, Wand2,
 } from 'lucide-react'
 import { acc } from '@/data/mock'
 import type { Post } from '@/data/types'
@@ -100,6 +100,7 @@ export default function Profile() {
             {badges.has('verified_major_person') && <Badge tone="warn" icon={<Crown className="size-3.5" />}>Verified major person{dto.popularity_level && dto.popularity_level !== 'none' ? ` · ${dto.popularity_level}` : ''}</Badge>}
             {a.verification === 'company' && <Badge tone="dark" icon={<ShieldCheck className="size-3.5" />}>Verified company</Badge>}
             {badges.has('id_verified') && !badges.has('verified_creator') && <Badge tone="neutral" icon={<ShieldCheck className="size-3.5" />}>ID verified</Badge>}
+            {badges.has('subscriber') && <Badge tone="teal" icon={<Star className="size-3.5" />}>Subscriber</Badge>}
             {a.kind === 'company' && a.verification !== 'company' && <Badge tone="warn">Verification pending</Badge>}
             {a.niche && <Badge tone="neutral">{a.niche}</Badge>}
             {a.secondaryNiches?.map((n) => <Badge key={n} tone="outline">{n}</Badge>)}

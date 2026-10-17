@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bot, Check, Clapperboard, Download, Eye, Heart, Lightbulb, Lock, MessageCircle, ShieldCheck, Sparkles, UserPlus } from 'lucide-react'
+import { Bot, Check, Clapperboard, Download, Eye, Heart, Lightbulb, Lock, MessageCircle, ShieldCheck, Sparkles, Star, UserPlus } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import { fromMarketAgent } from '@/api/adapt'
 import { useApi } from '@/api/hooks'
@@ -246,7 +246,7 @@ interface SubDto { subscribed: boolean; status: string; period: 'monthly' | 'yea
 interface Plans { monthly: { usd_cents: number; local: number }; yearly: { usd_cents: number; local: number } }
 
 export function Subscription() {
-  const { refreshMe } = useSession()
+  const { refreshMe, me } = useSession()
   const sub = useApi((s) => api.get<SubDto>('/subscriptions', undefined, s), [])
   const plans = useApi((s) => api.get<Plans>('/subscriptions/plans', undefined, s), [])
   const [cycle, setCycle] = useState<'monthly' | 'yearly'>('monthly')
@@ -270,7 +270,9 @@ export function Subscription() {
     ['Contact companies first about likeness', '—', 'Yes', 'Can still reply'],
     ['Agent auto-replies', '—', 'Yes', 'Stops (1-day notice)'],
     ['Paid AI video', '$3 / $25 per min', '1 free std minute / mo', 'Unaffected'],
+    ['Subscriber badge on your profile', '—', 'Yes, with a verified ID', 'Removed'],
   ]
+  const idVerified = me.verification !== 'none'
   return (
     <div>
       <PageHeader title="Subscription" subtitle="One plan. A lapsed subscription only switches off extras. It never cancels paid contracts or blocks earnings." />
@@ -287,6 +289,11 @@ export function Subscription() {
             <thead><tr className="border-b border-line text-left text-[12px] text-ink-2"><th className="px-5 py-3 font-semibold">Feature</th><th className="px-3 font-semibold">Free</th><th className="px-3 font-semibold">Subscribed</th><th className="px-5 font-semibold">If it lapses</th></tr></thead>
             <tbody className="divide-y divide-line">{rows.map((r) => <tr key={r[0]}><td className="px-5 py-3 font-semibold text-ink">{r[0]}</td><td className="px-3 text-ink-2">{r[1]}</td><td className="px-3 font-semibold text-ink"><span className="flex items-center gap-1.5">{r[2] === 'Yes' && <Check className="size-4 text-teal" />}{r[2]}</span></td><td className="px-5 text-ink-2">{r[3]}</td></tr>)}</tbody>
           </table>
+          {s.subscribed && !idVerified && (
+            <Callout className="mx-5 mt-5" tone="warn" icon={<Star />} action={<Button size="sm" to="/app/verify">Verify ID</Button>}>
+              Verify your ID to show your Subscriber badge. It only appears on verified accounts, so it always means a real person.
+            </Callout>
+          )}
           <p className="p-5 text-[12.5px] text-ink-3">The Wamiwa Agent plan and brand video plans are separate purchases.</p>
         </Card>
       </div>
