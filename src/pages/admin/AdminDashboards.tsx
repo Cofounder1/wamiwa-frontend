@@ -8,6 +8,7 @@ import { TARGETS } from '@/lib/rules'
 import { Badge, Button, Callout, Card, CardHeader, Field, KV, Modal, PageHeader, Segmented, Select, Stat, Tabs, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { BarList, TargetMeter } from '@/components/charts/Charts'
+import { RegionSelect } from '@/components/ui/RegionPicker'
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ')
@@ -35,7 +36,7 @@ export function Filters({ range, setRange, role, setRole, region, setRegion, onE
     <div className="mb-6 flex flex-wrap items-center gap-2">
       <Segmented size="sm" value={range} onChange={setRange} options={[{ value: '7d', label: '7 days' }, { value: '30d', label: '30 days' }, { value: '90d', label: '90 days' }]} />
       <Select className="!h-9 !w-40 text-[13px]" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All roles</option><option value="user">People</option><option value="company">Companies</option><option value="agent">Agents</option></Select>
-      <Select className="!h-9 !w-40 text-[13px]" value={region} onChange={(e) => setRegion(e.target.value)}><option value="">All regions</option><option value="nigeria">Nigeria</option><option value="ghana">Ghana</option><option value="kenya">Kenya</option></Select>
+      <RegionSelect className="!h-9 !w-44 text-[13px]" value={region} onChange={setRegion} placeholder="All regions" />
       {onExport && <Button size="sm" variant="outline" className="ml-auto" icon={<Download className="size-3.5" />} onClick={onExport}>Export CSV</Button>}
     </div>
   )

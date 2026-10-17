@@ -15,6 +15,7 @@ import { Avatar, Badge, Button, Callout, Card, CardHeader, Empty, Field, Input, 
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { BarList } from '@/components/charts/Charts'
 import type { PlanDto } from '@/pages/wamiwa/WamiwaAgent'
+import { RegionSelect, regionName, useRegions } from '@/components/ui/RegionPicker'
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 const cap = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
@@ -24,6 +25,7 @@ const cap = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) :
 interface Buyer { id: string; handle: string; name: string; category: string | null; region?: string | null }
 
 export function B2B() {
+  const regions = useRegions()
   const { meDto, refreshMe } = useSession()
   const nav = useNavigate()
   const [q, setQ] = useState('')
@@ -59,7 +61,7 @@ export function B2B() {
             {buyers.error ? <ErrorState compact error={buyers.error} onRetry={buyers.reload} /> : !buyers.data ? <Spinner className="min-h-32" /> : buyers.data.map((b) => (
               <div key={b.id} className="flex items-center gap-4 p-4">
                 <Avatar name={b.name} kind="company" />
-                <div className="min-w-0 flex-1"><div className="font-bold text-ink">{b.name}</div><div className="text-[12.5px] text-ink-2">{cap(b.category)}{b.region ? ` · ${cap(b.region)}` : ''} · @{b.handle}</div></div>
+                <div className="min-w-0 flex-1"><div className="font-bold text-ink">{b.name}</div><div className="text-[12.5px] text-ink-2">{cap(b.category)}{b.region ? ` · ${regionName(b.region, regions)}` : ''} · @{b.handle}</div></div>
                 <Button size="sm" variant="outline" icon={<Send className="size-3.5" />} onClick={() => setPitch(b)}>Pitch</Button>
               </div>
             ))}
@@ -338,8 +340,8 @@ export function CompanySettings() {
       </Card>
       <Card className="mt-6 p-5">
         <div className="mb-2 flex items-center gap-2 text-[14px] font-bold text-ink"><MapPin className="size-4 text-brand" />Region targeting</div>
-        <p className="mb-3 text-[13px] text-ink-2">Sets which influencers you see first. It never hides anyone completely.</p>
-        <div className="flex flex-wrap gap-2">{['', 'lagos', 'abuja', 'port_harcourt', 'ibadan', 'accra', 'nairobi'].map((r) => <button key={r || 'any'} onClick={() => setRegion(r)} className={cn('h-9 rounded-chip border px-3.5 text-[13px] font-semibold', region === r ? 'border-ink bg-ink text-bg' : 'border-line hover:bg-wash')}>{r ? cap(r.replace('_', ' ')) : 'No preference'}</button>)}</div>
+        <p className="mb-3 text-[13px] text-ink-2">Influencers in this country appear first. It never hides anyone completely.</p>
+        <RegionSelect className="max-w-sm" value={region} onChange={setRegion} placeholder="No preference" />
       </Card>
       <Card className="mt-6 flex items-center gap-4 p-5"><MessageSquare className="size-5 text-brand" /><div className="flex-1"><div className="font-bold text-ink">Contact Wamiwa support</div><div className="text-[13px] text-ink-2">Payments and safety issues get a reply within 4 hours.</div></div><Button variant="outline" to="/app/support">Open ticket</Button></Card>
       <Button className="mt-6" loading={busy} onClick={save}>Save changes</Button>

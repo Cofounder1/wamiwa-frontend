@@ -11,6 +11,7 @@ import { cn } from '@/lib/cn'
 import { Button, Callout, Checkbox, Chip, Field, Input, Textarea, toast } from '@/components/ui/primitives'
 import { Logo } from '@/components/ui/Logo'
 import { unsplash as u } from '@/data/art'
+import { RegionSelect } from '@/components/ui/RegionPicker'
 
 type Step = 'type' | 'email' | 'otp' | 'dob' | 'refused' | 'account' | 'guardian' | 'waiting' | 'profile' | 'phone' | 'friends' | 'company' | 'company-review'
 
@@ -266,6 +267,7 @@ function AccountStep({ kind, email, signupToken, dob, onCreated }: {
   const [handle, setHandle] = useState(() => email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 30))
   const [password, setPassword] = useState('')
   const [category, setCategory] = useState('')
+  const [region, setRegion] = useState('nigeria')
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const handleOk = /^[a-z0-9_]{3,30}$/i.test(handle)
@@ -276,7 +278,7 @@ function AccountStep({ kind, email, signupToken, dob, onCreated }: {
     try {
       const res = await api.post<LoginDto>('/auth/signup/complete', {
         signup_token: signupToken, account_type: kind === 'company' ? 'company' : 'user', password, handle, name,
-        date_of_birth: kind === 'person' ? dob : null, category: kind === 'company' ? category.toLowerCase() || null : null, region: 'nigeria',
+        date_of_birth: kind === 'person' ? dob : null, category: kind === 'company' ? category.toLowerCase() || null : null, region: region || null,
       })
       await onCreated(res)
     } catch (err) {
@@ -293,6 +295,7 @@ function AccountStep({ kind, email, signupToken, dob, onCreated }: {
           <Input icon={<AtSign />} value={handle} onChange={(e) => setHandle(e.target.value)} required />
         </Field>
         {kind === 'company' && <Field label="Category"><Input placeholder="Fashion" value={category} onChange={(e) => setCategory(e.target.value)} /></Field>}
+        <Field label="Country" hint={kind === 'company' ? 'Where your business is based.' : 'Where you live. You can change it later.'}><RegionSelect value={region} onChange={setRegion} /></Field>
         <Field label="Password" hint="At least 10 characters."><Input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={10} /></Field>
         {error && <Callout tone="danger">{error}</Callout>}
         <Button type="submit" size="lg" className="w-full" loading={busy} disabled={!name || !handleOk || password.length < 10}>Create account</Button>

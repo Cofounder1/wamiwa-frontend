@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn'
 import { Avatar, Badge, Button, Callout, Card, CardHeader, Field, Input, Modal, PageHeader, Segmented, Select, Switch, Tabs, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { OtpInput } from '@/pages/auth/Signup'
+import { RegionSelect } from '@/components/ui/RegionPicker'
 
 type Tab = 'profile' | 'notifications' | 'privacy' | 'blocked' | 'delete'
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
@@ -35,17 +36,17 @@ export default function Settings() {
 function ProfileTab() {
   const { me, meDto, refreshMe } = useSession()
   const p = meDto?.profile
-  const [form, setForm] = useState({ name: '', bio: '', location: '', primary_niche: '', links: '' })
+  const [form, setForm] = useState({ name: '', bio: '', location: '', region: '', primary_niche: '', links: '' })
   const [busy, setBusy] = useState(false)
   useEffect(() => {
-    if (p) setForm({ name: p.name, bio: p.bio ?? '', location: p.location ?? '', primary_niche: p.primary_niche ?? '', links: p.links.join('\n') })
-  }, [p])
+    if (p) setForm({ name: p.name, bio: p.bio ?? '', location: p.location ?? '', region: meDto?.region ?? '', primary_niche: p.primary_niche ?? '', links: p.links.join('\n') })
+  }, [p, meDto?.region])
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }))
   const save = async () => {
     setBusy(true)
     try {
       await api.patch('/accounts/me/profile', {
-        name: form.name, bio: form.bio, location: form.location, primary_niche: form.primary_niche || null,
+        name: form.name, bio: form.bio, location: form.location, region: form.region, primary_niche: form.primary_niche || null,
         links: form.links.split(/\s+/).filter(Boolean),
       })
       toast('Profile saved'); void refreshMe()
@@ -73,7 +74,8 @@ function ProfileTab() {
         <Field label="Verified name" hint="Changes only through a new ID check."><Input value={p?.verified_name ?? 'Not verified yet'} disabled icon={<Lock />} /></Field>
         <Field label="Bio" className="sm:col-span-2"><Textarea value={form.bio} onChange={set('bio')} maxLength={2000} /></Field>
         <Field label="Primary niche" hint="Changing niche doesn’t affect active contracts."><Select value={form.primary_niche} onChange={set('primary_niche')}><option value="">—</option>{NICHES.map((n) => <option key={n} value={n.toLowerCase()}>{n}</option>)}</Select></Field>
-        <Field label="Location"><Input value={form.location} onChange={set('location')} /></Field>
+        <Field label="Location" hint="Shown on your profile, e.g. your city."><Input value={form.location} onChange={set('location')} /></Field>
+        <Field label="Country" hint="Brands targeting your country see you first."><RegionSelect value={form.region} onChange={(region) => setForm((f) => ({ ...f, region }))} /></Field>
         <Field label="Links" className="sm:col-span-2" hint="One per line, up to 10."><Textarea value={form.links} onChange={set('links')} className="min-h-20" /></Field>
       </div>
       <Button className="mt-6" loading={busy} onClick={save}>Save changes</Button>

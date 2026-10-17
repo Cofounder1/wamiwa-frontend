@@ -8,8 +8,9 @@ import { useApi } from '@/api/hooks'
 import { useSession } from '@/context/session'
 import { date, naira, usd } from '@/lib/format'
 import { cn } from '@/lib/cn'
-import { Badge, Button, Callout, Card, CardHeader, Checkbox, Chip, Field, Input, Modal, PageHeader, Segmented, Select, Tabs, Textarea, toast } from '@/components/ui/primitives'
+import { Badge, Button, Callout, Card, CardHeader, Checkbox, Field, Input, Modal, PageHeader, Segmented, Select, Tabs, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
+import { RegionPicker, regionName, useRegions } from '@/components/ui/RegionPicker'
 
 type Kind = 'business' | 'seller' | 'artist' | 'label'
 interface PlanPrice { usd_cents: number; local: number; links: number }
@@ -254,13 +255,12 @@ function AddLinkModal({ names, onClose, onAdded }: { names: NameDto[]; onClose: 
 /* ── WA-10 Content ideas (Plus) ─────────────────────────────────────────── */
 
 interface IdeasDto { day: string; regions: { region: string; fallback?: boolean; ideas: { idea: string; topic: string; confidence: 'low' | 'medium' | 'high'; why: string[] }[] }[] }
-const REGIONS = ['nigeria', 'ghana', 'kenya', 'south_africa', 'united_kingdom', 'united_states', 'china', 'uae']
-const pretty = (r: string) => r.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 
 export function ContentIdeas() {
   const plan = useApi((s) => api.get<PlanDto | null>('/promotions', undefined, s), [])
   const ideas = useApi(plan.data?.tier === 'plus' ? (s) => api.get<IdeasDto>('/promotions/content-ideas', undefined, s) : null, [plan.data?.tier, plan.data?.target_regions.join()])
   const [saving, setSaving] = useState(false)
+  const allRegions = useRegions()
   if (plan.error) return <ErrorState error={plan.error} onRetry={plan.reload} />
   if (plan.loading) return <Spinner />
   if (plan.data?.tier !== 'plus') return (
@@ -272,8 +272,7 @@ export function ContentIdeas() {
     </div>
   )
   const regions = plan.data.target_regions
-  const toggle = async (r: string) => {
-    const next = regions.includes(r) ? regions.filter((x) => x !== r) : regions.length >= 5 ? regions : [...regions, r]
+  const save = async (next: string[]) => {
     setSaving(true)
     try { await api.patch('/promotions', { target_regions: next }); plan.reload() } catch (e) { toast('Couldn’t update regions', errMsg(e), 'danger') } finally { setSaving(false) }
   }
@@ -281,14 +280,14 @@ export function ContentIdeas() {
     <div>
       <PageHeader back={{ to: '/app/wamiwa-agent', label: 'Wamiwa Agent' }} title="Content ideas" subtitle="Built from what’s measurably rising in each region (science) and its upcoming cultural moments (art). Suggestions, not guarantees." />
       <Card className="mb-6 p-5">
-        <div className="mb-3 flex items-center justify-between"><span className="flex items-center gap-2 text-[13.5px] font-bold text-ink"><Globe2 className="size-4 text-brand" />Target regions</span><span className="text-[12px] text-ink-3">{regions.length}/5 · they don’t need to include where you are</span></div>
-        <div className={cn('flex flex-wrap gap-2', saving && 'pointer-events-none opacity-60')}>{REGIONS.map((r) => <Chip key={r} active={regions.includes(r)} onClick={() => toggle(r)}>{pretty(r)}</Chip>)}</div>
+        <div className="mb-3 flex items-center justify-between"><span className="flex items-center gap-2 text-[13.5px] font-bold text-ink"><Globe2 className="size-4 text-brand" />Target regions</span><span className="text-[12px] text-ink-3">{regions.length}/5 · any country, anywhere in the world</span></div>
+        <RegionPicker value={regions} onChange={save} max={5} disabled={saving} />
       </Card>
       {ideas.error ? <ErrorState error={ideas.error} onRetry={ideas.reload} /> : !ideas.data ? <Spinner className="min-h-40" /> : (
         <div className="grid gap-4 md:grid-cols-2">
           {ideas.data.regions.flatMap((r) => r.ideas.map((i, n) => (
             <Card key={r.region + n} className="p-5">
-              <div className="flex items-center justify-between"><Badge tone="neutral" icon={<Globe2 className="size-3" />}>{pretty(r.region)}</Badge><Badge tone={i.confidence === 'high' ? 'success' : i.confidence === 'medium' ? 'brand' : 'neutral'}>{i.confidence} confidence</Badge></div>
+              <div className="flex items-center justify-between"><Badge tone="neutral" icon={<Globe2 className="size-3" />}>{regionName(r.region, allRegions)}</Badge><Badge tone={i.confidence === 'high' ? 'success' : i.confidence === 'medium' ? 'brand' : 'neutral'}>{i.confidence} confidence</Badge></div>
               <h3 className="mt-3 text-[16px] leading-snug font-extrabold text-ink">{i.idea}</h3>
               <p className="mt-2 text-[12.5px] text-ink-2">Why: {i.why.join(' · ')}</p>
               {r.fallback && <p className="mt-2 text-[12px] font-semibold text-warn">No measurable data yet — based on upcoming moments only</p>}
