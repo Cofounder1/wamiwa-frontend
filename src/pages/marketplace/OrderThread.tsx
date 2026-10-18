@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Check, Coins, Gavel, Loader2, RotateCcw, Send, Sparkles, Star, Undo2 } from 'lucide-react'
 import { acc } from '@/data/mock'
-import { api, ApiError } from '@/api/client'
+import { api, errMsg } from '@/api/client'
 import { fromContract, statusText } from '@/api/adapt'
 import { useApi } from '@/api/hooks'
 import type { ContractDto, MessageDto } from '@/api/types'
@@ -13,8 +13,7 @@ import { Avatar, Badge, Button, Callout, Card, CardHeader, KV, Modal, PageHeader
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { WhoTag } from '@/components/social/labels'
 import { DisputeModal } from '@/pages/earn/Disputes'
-
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
+import { Markdown } from '@/components/ui/Markdown'
 
 export default function OrderThread() {
   const { id = '' } = useParams()
@@ -70,7 +69,7 @@ export default function OrderThread() {
             <Card className="overflow-hidden">
               <CardHeader title="Delivery" subtitle={`${dto.delivered_at ? `Delivered ${date(dto.delivered_at)} · ` : ''}review window: ${daysLeft} days left`} action={<Badge tone="brand">{isHirer ? 'Awaiting your review' : 'Waiting for the hirer'}</Badge>} />
               <div className="p-5">
-                <div className="rounded-2xl border border-line bg-surface-2 p-5 text-[14px] leading-relaxed whitespace-pre-wrap text-ink">{dto.delivery}</div>
+                <Markdown text={dto.delivery ?? ''} className="rounded-2xl border border-line bg-surface-2 p-5 text-[14px] leading-relaxed text-ink" />
                 <Progress className="mt-5" value={7 - daysLeft} max={7} />
                 <div className="mt-1.5 text-[12px] text-ink-3">Funds clear automatically if there’s no response in {daysLeft} days.</div>
                 {isHirer && (

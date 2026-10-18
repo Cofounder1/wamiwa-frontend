@@ -3,7 +3,7 @@ import { Link, Navigate, useParams } from 'react-router-dom'
 import {
   AlertOctagon, Bot, Briefcase, CalendarClock, Check, Clapperboard, FileSignature, Gavel, HeartHandshake, MessageSquare, Play, PenLine, Percent, Snowflake, Wand2, XCircle,
 } from 'lucide-react'
-import { api, ApiError } from '@/api/client'
+import { api, errMsg } from '@/api/client'
 import { fromContract, partyName, statusText } from '@/api/adapt'
 import { useApi, usePaged, useParties } from '@/api/hooks'
 import type { ContractDto } from '@/api/types'
@@ -23,8 +23,6 @@ const typeMeta = {
 }
 const stateTone = { Funded: 'neutral', Active: 'brand', Delivered: 'warn', Cleared: 'success', Paid: 'teal', Frozen: 'danger', Refunded: 'neutral' } as const
 const DONE = ['completed', 'cancelled', 'declined', 'expired']
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
-
 export function ContractsList() {
   const { role } = useSession()
   const brand = role === 'company'

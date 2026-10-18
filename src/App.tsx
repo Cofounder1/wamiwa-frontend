@@ -13,6 +13,7 @@ function lz<M extends Record<string, unknown>>(load: () => Promise<M>, name: key
 const Signup = lz(() => import('@/pages/auth/Signup'))
 const Login = lz(() => import('@/pages/auth/Login'))
 const Developers = lz(() => import('@/pages/marketing/Developers'))
+const ProGrowth = lz(() => import('@/pages/earn/ProGrowth'))
 
 const Feed = lz(() => import('@/pages/social/Feed'))
 const PostDetail = lz(() => import('@/pages/social/PostDetail'))
@@ -127,6 +128,7 @@ export default function App() {
             <Route path="wamiwa-agent/ideas" element={<ContentIdeas />} />
             <Route path="claim-name" element={<ClaimName />} />
             <Route path="subscription" element={<Subscription />} />
+            <Route path="grow" element={<ProGrowth />} />
             {/* Earn */}
             <Route path="earnings" element={<Earnings />} />
             <Route path="offers" element={<Offers />} />

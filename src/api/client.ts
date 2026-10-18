@@ -149,3 +149,6 @@ export function mediaUrl(ref: string | null | undefined) {
 }
 
 export const cents = (c: number | null | undefined) => (c ?? 0) / 100
+
+/** The message to show a person for a failed request. */
+export const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')

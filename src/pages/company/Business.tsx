@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   AtSign, Check, Copy, CreditCard, FileUp, Globe, KeyRound, Link2, Lock, MapPin, MessageSquare, Mic2, Plug, Plus, Receipt, RotateCcw, Send, ShieldCheck, Trash2,
 } from 'lucide-react'
-import { api, ApiError } from '@/api/client'
+import { api, errMsg } from '@/api/client'
 import { fromPost } from '@/api/adapt'
 import { useApi } from '@/api/hooks'
 import type { PostDto } from '@/api/types'
@@ -17,7 +17,6 @@ import { BarList } from '@/components/charts/Charts'
 import type { PlanDto } from '@/pages/wamiwa/WamiwaAgent'
 import { RegionSelect, regionName, useRegions } from '@/components/ui/RegionPicker'
 
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 const cap = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
 
 /* ── CO-03 B2B discovery ────────────────────────────────────────────────── */

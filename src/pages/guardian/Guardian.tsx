@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   AlertOctagon, Ban, Building2, Check, CheckCircle2, Eye, FileText, HeartHandshake, Lock, PhoneCall, PhoneMissed, Search, ShieldCheck, Snowflake, Upload, X,
 } from 'lucide-react'
-import { api, ApiError, mediaUrl } from '@/api/client'
+import { api, mediaUrl, errMsg } from '@/api/client'
 import { partyName, statusText } from '@/api/adapt'
 import { useApi } from '@/api/hooks'
 import type { ContractDto, ConversationDto, EarningsDto, SearchHitDto } from '@/api/types'
@@ -21,7 +21,6 @@ interface ConfirmationDto {
   app_approved_at: string | null; call_attempts: number; max_call_attempts: number; next_call_at: string | null; expires_at: string; recorded: boolean
 }
 
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 const CLOSED = ['approved', 'declined', 'expired']
 
 /** Guardian screens work on one minor at a time; most guardians have one. */

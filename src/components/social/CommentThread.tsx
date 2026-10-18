@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { AtSign, Bot, Clock, Flag, Info, Send, Store, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react'
 import { acc } from '@/data/mock'
 import type { Comment } from '@/data/types'
-import { api, ApiError } from '@/api/client'
+import { api, errMsg } from '@/api/client'
 import { fromComments, fromMarketAgent } from '@/api/adapt'
 import { useApi, usePaged } from '@/api/hooks'
 import type { CommentDto, MarketAgentDto } from '@/api/types'
@@ -18,11 +18,12 @@ import { VerifiedMark, WhoTag } from './labels'
 import { RichText, SuggestedSellersLink } from './sponsored'
 import { ReportModal } from './ReportModal'
 import { VoteRail } from './PostCard'
+import { Markdown } from '@/components/ui/Markdown'
 
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
-
-export function CommentThread({ postId, postAuthorId, variant = 'people' }: {
+export function CommentThread({ postId, postAuthorId, variant = 'people', onCountChange }: {
   postId: string; postAuthorId: string; variant?: 'people' | 'agents'
+  /** Called with +1 or -1 as visible comments are added or deleted here, so the count above stays right. */
+  onCountChange?: (delta: number) => void
 }) {
   const list = usePaged<CommentDto, CommentDto>(
     (cursor, signal) => api.page<CommentDto>(`/posts/${postId}/comments`, { cursor, limit: 30 }, signal),
@@ -33,8 +34,13 @@ export function CommentThread({ postId, postAuthorId, variant = 'people' }: {
   const [removed, setRemoved] = useState<Set<string>>(new Set())
 
   // Merge server pages with comments posted in this session (replies are nested by parent).
+  // A deleted comment with replies stays as "[deleted]" so its replies keep their place, as after a reload.
   const merged = mergeTree(list.items, added)
-  const items = fromComments(merged).filter((c) => !removed.has(c.id))
+  const all = fromComments(merged)
+  const hasReplies = (id: string) => all.some((c) => c.parentId === id && !removed.has(c.id))
+  const items = all
+    .filter((c) => !removed.has(c.id) || hasReplies(c.id))
+    .map((c) => (removed.has(c.id) ? { ...c, text: '[deleted]', mentions: undefined, suggest: undefined } : c))
   const roots = items.filter((c) => !c.parentId)
   const childrenOf = (id: string) => items.filter((c) => c.parentId === id)
 
@@ -49,11 +55,14 @@ export function CommentThread({ postId, postAuthorId, variant = 'people' }: {
   const add = async (text: string, parentId?: string) => {
     const created = await api.post<CommentDto>(`/posts/${postId}/comments`, { text, parent_id: parentId ?? null })
     setAdded((x) => [...x, created])
+    if (created.moderation_status === 'visible') onCountChange?.(1) // a comment hidden for review isn't counted
   }
   const remove = async (id: string) => {
     try {
       await api.del(`/comments/${id}`)
+      const wasCounted = !removed.has(id) && !items.find((c) => c.id === id)?.hidden
       setRemoved((s) => new Set(s).add(id))
+      if (wasCounted) onCountChange?.(-1)
       toast('Comment deleted')
     } catch (e) { toast('Couldn’t delete', errMsg(e), 'danger') }
   }
@@ -179,6 +188,9 @@ function TagBody({ c }: { c: Comment; postAuthorId?: string }) {
         <span className="flex gap-0.5">{[0, 1, 2].map((i) => <span key={i} className="size-1 animate-typing rounded-full bg-current" style={{ animationDelay: `${i * 0.15}s` }} />)}</span>
       </div>
     )
+  }
+  if (c.label === 'agent' || c.label === 'autoreply') {  // agents may answer in plain text or with structure
+    return <Markdown text={c.text} className="mt-1 text-[14px] leading-relaxed text-ink" />
   }
   return (
     <p className="mt-1 text-[14px] leading-relaxed text-ink">

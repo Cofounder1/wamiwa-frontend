@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Building2, Check, CircleCheck, Crown, ImagePlus, Lock, Mic, ShieldCheck, Trash2, Upload, X } from 'lucide-react'
-import { api, ApiError, mediaUrl } from '@/api/client'
+import { api, mediaUrl, errMsg } from '@/api/client'
 import { fromContract, partyName, statusText } from '@/api/adapt'
 import { useApi } from '@/api/hooks'
 import type { ContractDto, ProfileDto } from '@/api/types'
@@ -14,8 +14,6 @@ import { ErrorState, Spinner } from '@/components/ui/states'
 interface Guide { type: 'follower_based' | 'major_person' | string; names_own_price: boolean; max_price_cents?: number; recommended_min_cents?: number; recommended_max_cents?: number; note?: string }
 interface Asset { asset_id: string; kind: 'photo' | 'voice'; file: string; duration_seconds: number }
 interface PageDto { price_image_cents?: number; price_voice_cents?: number | null; exclusivity_price_cents?: number | null; voice_available?: boolean }
-
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 
 export default function Likeness() {
   const { me } = useSession()

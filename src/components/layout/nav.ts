@@ -1,7 +1,7 @@
 import {
   Activity, BadgeCheck, BarChart3, Bell, Bot, Briefcase, Building2, CircleDollarSign, Clapperboard,   Compass, CreditCard, FileSignature, Gauge, Gavel, HandCoins, HeartHandshake, Home, Inbox, KeyRound, Lightbulb,
   ListChecks, Map, Megaphone, MessageSquare, Mic2, Network, PhoneCall, Plus, ScrollText, Settings, Shield,
-  ShieldCheck, Smile, Sparkles, Store, Tags, Upload, UserCog, Users, Wallet, Wand2, LifeBuoy, Eye,
+  ShieldCheck, Smile, Sparkles, Store, Tags, TrendingUp, Upload, UserCog, Users, Wallet, Wand2, LifeBuoy, Eye,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/context/session'
@@ -46,6 +46,7 @@ export const NAV: Record<Role, NavGroup[]> = {
       items: [
         { to: '/app/analytics', label: 'Analytics', icon: BarChart3 },
         { to: '/app/ideas', label: 'Daily post ideas', icon: Lightbulb },
+        { to: '/app/grow', label: 'Grow with Pro', icon: TrendingUp },
         { to: '/app/ai-video', label: 'AI video', icon: Clapperboard },
         { to: '/app/autoreply', label: 'Auto-reply agent', icon: Bot },
         { to: '/app/wamiwa-agent', label: 'Wamiwa Agent', icon: Megaphone },
@@ -63,6 +64,13 @@ export const NAV: Record<Role, NavGroup[]> = {
         { to: '/app/offers', label: 'Offers', icon: Inbox },
         { to: '/app/earnings', label: 'My earnings', icon: Wallet },
         { to: '/app/guardian-link', label: 'My guardian', icon: HeartHandshake },
+      ],
+    },
+    {
+      title: 'Grow',
+      items: [
+        { to: '/app/grow', label: 'Grow with Pro', icon: TrendingUp },
+        { to: '/app/subscription', label: 'Subscription', icon: Sparkles },
       ],
     },
     footer,

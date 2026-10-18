@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Ban, CheckCheck, FileText, Flag, Image as ImageIcon, Loader2, Paperclip, Send, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Ban, CheckCheck, FileText, Flag, Image as ImageIcon, Loader2, Paperclip, Send, ShieldCheck, Sparkles } from 'lucide-react'
 import { acc } from '@/data/mock'
 import { api, ApiError, mediaUrl } from '@/api/client'
 import { fromAuthor } from '@/api/adapt'
@@ -14,6 +14,7 @@ import { Menu } from '@/components/ui/Menu'
 import { ErrorState, LoadMore, RowSkeleton } from '@/components/ui/states'
 import { VerifiedMark, WhoTag } from '@/components/social/labels'
 import { ReportModal } from '@/components/social/ReportModal'
+import { SummarizeChat } from '@/components/social/SummarizeChat'
 
 type ChatTab = 'primary' | 'requests' | 'business'
 interface Attachment { kind: 'image' | 'video' | 'voice' | 'document'; ref: string; size_bytes: number; name?: string }
@@ -85,6 +86,7 @@ function Thread({ conversationId, meta, onBack, onChanged }: { conversationId: s
   const res = useApi((s) => api.get<ThreadDto>(`/conversations/${conversationId}/messages`, { limit: 50 }, s), [conversationId])
   const [sent, setSent] = useState<(MessageDto & { attachments: Attachment[] })[]>([])
   const [report, setReport] = useState(false)
+  const [summarize, setSummarize] = useState(false)
   const end = useRef<HTMLDivElement>(null)
   const other = meta?.with[0] ? acc(meta.with[0].id) : undefined
 
@@ -116,6 +118,7 @@ function Thread({ conversationId, meta, onBack, onChanged }: { conversationId: s
         </div>
         {meta?.contract_id && <Button size="sm" variant="outline" to={meta.type === 'order' ? `/app/orders/${meta.contract_id}` : `/app/contracts/${meta.contract_id}`}>View {meta.type === 'order' ? 'order' : 'contract'}</Button>}
         <Menu items={[
+          { label: 'Summarize with an agent', icon: <Sparkles />, hidden: meta?.type === 'order', onClick: () => setSummarize(true) },
           { label: 'Report chat', icon: <Flag />, onClick: () => setReport(true) },
           { label: isBlocked ? 'Unblock' : 'Block', icon: <Ban />, danger: !isBlocked, hidden: !other, onClick: () => { toggleBlock(other!.id, !isBlocked); toast(isBlocked ? 'Unblocked' : 'Blocked', isBlocked ? undefined : 'Active contracts continue; their messages move to the contract thread.') } },
         ]} />
@@ -150,6 +153,7 @@ function Thread({ conversationId, meta, onBack, onChanged }: { conversationId: s
         <ChatComposer conversationId={conversationId} onSend={send} />
       )}
       <ReportModal open={report} onClose={() => setReport(false)} target="chat" targetType="conversation" targetId={conversationId} />
+      <SummarizeChat open={summarize} onClose={() => setSummarize(false)} conversationId={conversationId} />
     </section>
   )
 }

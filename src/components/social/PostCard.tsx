@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  ArrowBigUp, Ban, Bookmark, Bot, Eye, Flag, Heart, MessageCircle, Play, Share2, UserPlus,
+  ArrowBigUp, Ban, Bookmark, Bot, Flag, Heart, MessageCircle, Share2, UserPlus,
 } from 'lucide-react'
 import { acc } from '@/data/mock'
 import type { Post } from '@/data/types'
@@ -13,6 +13,7 @@ import { Menu } from '@/components/ui/Menu'
 import { AiBadge, VerifiedMark, WhoTag } from './labels'
 import { RichText, SuggestedSellersLink } from './sponsored'
 import { ReportModal } from './ReportModal'
+import { Markdown } from '@/components/ui/Markdown'
 
 /* ── People feed card ───────────────────────────────────────────────────── */
 
@@ -57,7 +58,12 @@ export function PostCard({ post, detail }: { post: Post; detail?: boolean }) {
         {post.suggestUrl && <div onClick={(e) => e.stopPropagation()}><SuggestedSellersLink category={new URL(post.suggestUrl, 'http://x').searchParams.get('category') ?? 'this'} url={post.suggestUrl} /></div>}
       </div>
 
-      {post.media && (
+      {post.media && post.kind === 'video' && (
+        <div className="px-5 pt-3">
+          <PostVideo src={post.media} detail={detail} aiBadge={post.aiBadge} likenessBadge={post.likenessBadge} />
+        </div>
+      )}
+      {post.media && post.kind !== 'video' && (
         <div className="px-5 pt-3">
           <button onClick={open} className="group/media relative block w-full overflow-hidden rounded-[18px] bg-wash">
             <img src={post.media} alt="" loading="lazy" className={cn('w-full object-cover transition duration-500 group-hover/media:scale-[1.015]', detail ? 'max-h-[640px]' : 'aspect-[4/5] max-h-[560px]')} />
@@ -66,17 +72,6 @@ export function PostCard({ post, detail }: { post: Post; detail?: boolean }) {
               {post.aiBadge && <AiBadge kind="generated" />}
               {post.likenessBadge && <AiBadge kind="likeness" />}
             </span>
-            {post.kind === 'video' && (
-              <>
-                <span className="absolute top-1/2 left-1/2 grid size-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/20 text-white ring-1 ring-white/40 backdrop-blur-md transition group-hover/media:scale-110">
-                  <Play className="ml-1 size-7 fill-current" />
-                </span>
-                <span className="absolute bottom-3 left-3 flex items-center gap-3 text-[12.5px] font-semibold text-white">
-                  {post.views && <span className="flex items-center gap-1"><Eye className="size-3.5" />{compact(post.views)}</span>}
-                </span>
-                <span className="absolute right-3 bottom-3 rounded-md bg-black/50 px-1.5 py-0.5 text-[11.5px] font-semibold text-white num">{post.duration}</span>
-              </>
-            )}
           </button>
         </div>
       )}
@@ -136,11 +131,13 @@ export function AgentPostCard({ post, detail }: { post: Post; detail?: boolean }
           <span>· {ago(post.createdAt)}</span>
         </div>
         <h3 className={cn('mt-1.5 font-extrabold tracking-[-0.015em] text-ink', detail ? 'text-[22px] leading-snug' : 'text-[17px] leading-snug')}>{post.title}</h3>
-        {post.text && (
-          <p className={cn('mt-1.5 text-[14.5px] leading-relaxed text-ink-2', !detail && 'line-clamp-3')}>
-            <RichText text={post.text} />
-          </p>
-        )}
+        {post.text && (detail
+          ? <Markdown text={post.text} className="mt-1.5 text-[14.5px] leading-relaxed text-ink-2" />
+          : (
+            <p className="mt-1.5 line-clamp-3 text-[14.5px] leading-relaxed text-ink-2">
+              <RichText text={post.text} />
+            </p>
+          ))}
         <div className="mt-3 flex items-center gap-1 text-[12.5px] font-semibold text-ink-2">
           <span className="inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 hover:bg-wash"><MessageCircle className="size-4" />{post.comments} {post.comments === 1 ? 'reply' : 'replies'}</span>
           <Link onClick={(e) => e.stopPropagation()} to={`/app/marketplace/${a.handle}`} className="inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-agent hover:bg-agent-soft"><Bot className="size-4" />Hire @{a.handle}</Link>
@@ -157,6 +154,33 @@ export function VoteRail({ score, vote, setVote, compact: small }: { score: numb
         <ArrowBigUp className={cn('size-5', vote === 1 && 'fill-current')} />
       </button>
       <span className={cn('text-[13px] font-extrabold num', vote === 1 ? 'text-agent' : 'text-ink')}>{compact(score)}</span>
+    </div>
+  )
+}
+
+/** A video post plays in place. `#t=0.1` makes phones show the first frame instead of a black box. */
+function PostVideo({ src, detail, aiBadge, likenessBadge }: { src: string; detail?: boolean; aiBadge?: boolean; likenessBadge?: boolean }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <div className="grid aspect-video place-items-center rounded-[18px] bg-wash px-6 text-center text-[13px] text-ink-2">
+        This video can’t be played here. It may be in a format this browser doesn’t support (for example an iPhone .mov), or it’s no longer stored.
+      </div>
+    )
+  }
+  return (
+    <div className="relative overflow-hidden rounded-[18px] bg-black">
+      <video
+        src={`${src}#t=0.1`} controls playsInline preload="metadata"
+        onError={() => setFailed(true)}
+        className={cn('w-full bg-black object-contain', detail ? 'max-h-[640px]' : 'max-h-[560px]')}
+      />
+      {(aiBadge || likenessBadge) && (
+        <span className="pointer-events-none absolute top-3 left-3 flex gap-1.5">
+          {aiBadge && <AiBadge kind="generated" />}
+          {likenessBadge && <AiBadge kind="likeness" />}
+        </span>
+      )}
     </div>
   )
 }

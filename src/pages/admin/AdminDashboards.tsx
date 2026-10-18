@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Download, EyeOff, Megaphone, ShieldAlert, Trash2 } from 'lucide-react'
-import { api, API_URL, ApiError, auth } from '@/api/client'
+import { api, API_URL, ApiError, auth, errMsg } from '@/api/client'
 import { useApi } from '@/api/hooks'
 import { compact, date, int, naira, usd } from '@/lib/format'
 import { TARGETS } from '@/lib/rules'
@@ -10,9 +10,8 @@ import { ErrorState, Spinner } from '@/components/ui/states'
 import { BarList, TargetMeter } from '@/components/charts/Charts'
 import { RegionSelect } from '@/components/ui/RegionPicker'
 
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ')
-export interface Perms { suspend: boolean; approve_payouts: boolean; b2b_category_map: boolean; view_dashboard: boolean; view_revenue: boolean }
+export interface Perms { suspend: boolean; approve_payouts: boolean; b2b_category_map: boolean; view_dashboard: boolean; view_revenue: boolean; investigate?: boolean }
 export const usePerms = () => useApi((s) => api.get<Perms>('/admin/me/permissions', undefined, s), [])
 
 interface Metrics {

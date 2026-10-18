@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowUpRight, Check, Clock, FileText, Hand, KeyRound, Lock, Mail, PlayCircle, Plus, Search, ShieldCheck, Trash2, UserPlus, X } from 'lucide-react'
-import { api, ApiError } from '@/api/client'
+import { api, errMsg } from '@/api/client'
 import { partyName } from '@/api/adapt'
 import { useApi, usePaged } from '@/api/hooks'
 import type { ContractDto, MeDto } from '@/api/types'
@@ -12,12 +12,11 @@ import { Avatar, Badge, Button, Callout, Card, CardHeader, Checkbox, Empty, Fiel
 import { ErrorState, LoadMore, RowSkeleton, Spinner } from '@/components/ui/states'
 import { usePerms } from './AdminDashboards'
 
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ')
 
 /* ── AQ-01 / AQ-02 Queues ───────────────────────────────────────────────── */
 
-const QUEUES = ['identity', 'public_figure', 'company_verification', 'scripts', 'reports', 'disputes', 'payouts', 'fake_followers', 'promotions'] as const
+const QUEUES = ['identity', 'public_figure', 'company_verification', 'scripts', 'reports', 'disputes', 'payouts', 'fake_followers', 'promotions', 'investigations'] as const
 type QueueName = (typeof QUEUES)[number]
 interface QueueItemDto {
   id: string; queue: QueueName; target_type: string; target_id: string; subject_account_id: string | null; summary: string; severity: 'high' | 'normal' | 'low'
@@ -334,7 +333,7 @@ export function MinorContracts() {
 
 /* ── AD-01 Admin management ─────────────────────────────────────────────── */
 
-const PERMS = [['suspend', 'Suspend accounts'], ['approve_payouts', 'Approve payouts (with limit)'], ['b2b_category_map', 'Edit B2B category map'], ['view_dashboard', 'See the dashboard'], ['view_revenue', 'See revenue figures']] as const
+const PERMS = [['suspend', 'Suspend accounts'], ['approve_payouts', 'Approve payouts (with limit)'], ['b2b_category_map', 'Edit B2B category map'], ['view_dashboard', 'See the dashboard'], ['view_revenue', 'See revenue figures'], ['investigate', 'Investigation team: decide racism and Yoruba-insult reports']] as const
 interface AdminRow { id: string; email: string; handle: string; role: 'admin' | 'super_admin'; status: string; two_factor_enabled: boolean; permissions: (string | { permission: string; payout_limit?: number | null })[] }
 
 export function AdminManagement() {

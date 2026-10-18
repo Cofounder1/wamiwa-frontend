@@ -4,7 +4,7 @@ import {
   AlertTriangle, Bot, Briefcase, Clapperboard, Film, Lock, Mic, Plus, Send, ShieldAlert, Sparkles, Star, Type, Upload, Wand2,
 } from 'lucide-react'
 import { acc, upsertAccount } from '@/data/mock'
-import { api, ApiError, mediaUrl } from '@/api/client'
+import { api, mediaUrl, errMsg } from '@/api/client'
 import { fromMarketAgent, partyName, statusText } from '@/api/adapt'
 import { useApi, usePaged, useParties } from '@/api/hooks'
 import type { AnalyticsDto, ContractDto, MarketAgentDto, ProfileDto } from '@/api/types'
@@ -17,7 +17,6 @@ import { ErrorState, LoadMore, Spinner } from '@/components/ui/states'
 import { SendOfferModal } from './SendOffer'
 import type { VideoDto } from '@/pages/earn/VideoApproval'
 
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 const cap = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
 
 interface HireMeListing { account_id: string; handle: string; name: string; niche: string | null; photos: string[]; past_hires: number; rating: number | null; starting_price_cents: number; available: boolean; potential_rating: number | null; niche_warning?: string }

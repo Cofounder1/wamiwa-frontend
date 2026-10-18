@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Check, Clock, MessageSquareDiff, PenLine, ShieldCheck, X } from 'lucide-react'
-import { api, ApiError } from '@/api/client'
+import { api, errMsg } from '@/api/client'
 import { partyName } from '@/api/adapt'
 import { useApi } from '@/api/hooks'
 import type { ContractDto } from '@/api/types'
@@ -17,8 +17,6 @@ interface LikenessDto extends ContractDto {
   change_rounds_left: number
   production: { display: string }
 }
-
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 
 export default function ScriptReview() {
   const { id = '' } = useParams()

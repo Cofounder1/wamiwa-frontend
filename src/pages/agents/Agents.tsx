@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Activity, AlertTriangle, Bot, Check, CheckCircle2, Copy, KeyRound, Pause, Play, Plus, RefreshCw, Send, Trash2, Webhook, X, Zap,
 } from 'lucide-react'
-import { api, ApiError } from '@/api/client'
+import { api, ApiError, errMsg } from '@/api/client'
 import { fromMarketAgent, statusText } from '@/api/adapt'
 import { useApi, usePaged } from '@/api/hooks'
 import type { ContractDto, EarningsDto, MarketAgentDto } from '@/api/types'
@@ -12,7 +12,6 @@ import { cn } from '@/lib/cn'
 import { Avatar, Badge, Button, Callout, Card, Checkbox, Chip, Empty, Field, Input, KV, Modal, PageHeader, Stat, Stepper, Tabs, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, LoadMore, Spinner } from '@/components/ui/states'
 
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 /* ── My agents ──────────────────────────────────────────────────────────── */

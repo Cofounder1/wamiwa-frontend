@@ -59,8 +59,8 @@ export const VIDEO_PRICING = {
 }
 
 /** SB-01 / AV-01 */
-export const SUBSCRIPTION = { monthly: 10, yearly: 100 }
-export const AI_VIDEO = { standard: 3, premium: 25 }
+export const SUBSCRIPTION = { monthly: 10, yearly: 100, pro: { monthly: 16, yearly: 160 } }
+export const AI_VIDEO = { standard: 3, premium: 25, plan: { monthly: 30, videos: 15, minutesEach: 2 } }
 
 /** WA-01 — Wamiwa Agent plans. */
 export type PlanKind = 'business' | 'seller' | 'artist' | 'label'
@@ -91,7 +91,9 @@ export const ESCROW_STATES = ['Funded', 'Active', 'Delivered', 'Cleared', 'Paid'
 export type EscrowState = (typeof ESCROW_STATES)[number] | 'Frozen' | 'Refunded'
 
 /** RP-01 */
-export const REPORT_REASONS = ['Spam', 'Scam', 'Harassment', 'Impersonation', 'Misuse of likeness', 'Mislabeled AI', 'Other']
+export const REPORT_REASONS = ['Spam', 'Scam', 'Harassment', 'Racism or insulting Yoruba people', 'Impersonation', 'Misuse of likeness', 'Mislabeled AI', 'Other']
+/** The API value for each reason above (RP-01, RP-02). */
+export const REPORT_REASON_VALUE: Record<string, string> = { 'Racism or insulting Yoruba people': 'racism_ethnic_insult' }
 
 /** ON-04 */
 export const NICHES = [

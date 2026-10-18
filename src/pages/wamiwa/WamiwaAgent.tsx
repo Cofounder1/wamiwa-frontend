@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   AlertTriangle, ArrowUpRight, BarChart3, Check, Clock, Globe2, Lightbulb, Link2, Lock, Pause, Play, Plus, ShieldAlert, Sparkles, Tag, Trash2,
 } from 'lucide-react'
-import { api, ApiError } from '@/api/client'
+import { api, ApiError, errMsg } from '@/api/client'
 import { useApi } from '@/api/hooks'
 import { useSession } from '@/context/session'
 import { date, naira, usd } from '@/lib/format'
@@ -23,8 +23,6 @@ export interface PlanDto {
 }
 
 const KIND_NAME: Record<Kind, string> = { business: 'Business', seller: 'Individual seller', artist: 'Artist', label: 'Record label' }
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
-
 export default function WamiwaAgent() {
   const { role } = useSession()
   const plan = useApi((s) => api.get<PlanDto | null>('/promotions', undefined, s), [])

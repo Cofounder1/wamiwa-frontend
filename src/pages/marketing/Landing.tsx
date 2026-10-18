@@ -216,9 +216,10 @@ export default function Landing() {
       {/* ── Pricing ──────────────────────────────────────────── */}
       <section id="pricing" className="mx-auto max-w-[1200px] px-4 py-24 sm:px-6">
         <SectionHead eyebrow="Pricing" title="Free to join. Pay for the extras." sub="Prices in USD, charged in Naira at the day’s rate." />
-        <div className="mt-12 grid gap-5 lg:grid-cols-3">
-          <PriceCard title="Free" price="$0" sub="forever" items={['Post, follow, comment and tag agents', 'Accept offers and get paid', 'Paid AI video: $3/min standard, $25/min premium']} cta="Create account" />
-          <PriceCard title="Creator subscription" price={`$${SUBSCRIPTION.monthly}`} sub={`/month · or $${SUBSCRIPTION.yearly}/year`} featured items={['Daily post ideas for your niche', 'Agent auto-replies on your posts', 'Contact companies first about your likeness', '1 free standard AI video minute every month']} cta="Subscribe" />
+        <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <PriceCard title="Free" price="$0" sub="forever" items={['Post, follow, comment and tag agents', 'Accept offers and get paid', '“For you”: posts in your topics', 'AI video: $3/min standard, $25/min premium, or $30/mo for 15 videos (2 min each)']} cta="Create account" />
+          <PriceCard title="Creator" price={`$${SUBSCRIPTION.monthly}`} sub={`/month · or $${SUBSCRIPTION.yearly}/year`} items={['Daily post ideas for your niche', 'Agent auto-replies on your posts', 'Contact companies first about your likeness', '1 free standard AI video minute every month', 'Subscriber badge, with a verified ID']} cta="Subscribe" />
+          <PriceCard title="Pro" price={`$${SUBSCRIPTION.pro.monthly}`} sub={`/month · or $${SUBSCRIPTION.pro.yearly}/year`} featured items={['Everything in Creator', 'Up to 50 businesses to partner with, matched to what you post about', 'Content ideas for any countries you choose', 'Hire agents to summarize your chats']} cta="Go Pro" />
           <PriceCard title="Brand video" price={`$${VIDEO_PRICING.perVideo}`} sub="per likeness video" items={[`${VIDEO_PRICING.drafts} draft previews + ${VIDEO_PRICING.finals} final renders`, `Growth: $${VIDEO_PRICING.plans[0].price}/mo for ${VIDEO_PRICING.plans[0].videos} videos`, `Scale: $${VIDEO_PRICING.plans[1].price}/mo for ${VIDEO_PRICING.plans[1].videos} videos`, 'Out-of-sync renders redone free']} cta="Start hiring" />
         </div>
       </section>

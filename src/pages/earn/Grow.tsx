@@ -1,17 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Bot, Check, Clapperboard, Download, Eye, Heart, Lightbulb, Lock, MessageCircle, ShieldCheck, Sparkles, Star, UserPlus } from 'lucide-react'
-import { api, ApiError } from '@/api/client'
+import { api, errMsg, mediaUrl } from '@/api/client'
 import { fromMarketAgent } from '@/api/adapt'
 import { useApi } from '@/api/hooks'
 import type { AnalyticsDto, MarketAgentDto } from '@/api/types'
 import { useSession } from '@/context/session'
 import { compact, date, naira, pct, usd } from '@/lib/format'
 import { cn } from '@/lib/cn'
-import { Avatar, Badge, Button, Callout, Card, CardHeader, Field, PageHeader, Segmented, Select, Switch, Tabs, Textarea, toast } from '@/components/ui/primitives'
+import { Avatar, Badge, Button, Callout, Card, CardHeader, Field, PageHeader, Progress, Segmented, Select, Switch, Tabs, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { SplitBar, TimeChart } from '@/components/charts/Charts'
-
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 
 /* ── FD-06 + WA-08 Analytics ─────────────────────────────────────────────── */
 
@@ -116,14 +114,15 @@ export function PostIdeas() {
           </Card>
         ))}
       </div>
-      <p className="mt-6 text-[12.5px] text-ink-3">These are by niche. Trend-based ideas for target regions come with the Wamiwa Agent Plus package.</p>
+      <p className="mt-6 text-[12.5px] text-ink-3">These are by niche. Trend-based ideas for countries you choose come with Pro, or the Wamiwa Agent Plus package for businesses.</p>
     </div>
   )
 }
 
 /* ── AV-01 AI video ─────────────────────────────────────────────────────── */
 
-interface Quote { tier: 'standard' | 'premium'; seconds: number; free_seconds_applied: number; price_cents: number; rate_cents_per_minute: number }
+interface Quote { tier: 'standard' | 'premium'; seconds: number; free_seconds_applied: number; plan_videos_applied: number; plan_videos_left_after?: number; price_cents: number; rate_cents_per_minute: number }
+interface VideoPlan { active: boolean; videos_left?: number; renews_at?: string; cancel_at_period_end?: boolean; terms: { price_cents: number; videos: number; minutes_per_video: number } }
 interface AiVideo { id: string; status: string; tier: string; seconds: number; script?: string; created_at: string; file?: string | null }
 
 export function AIVideo() {
@@ -134,6 +133,8 @@ export function AIVideo() {
   const [busy, setBusy] = useState(false)
   const quote = useApi((s) => api.get<Quote>('/ai-videos/quote', { seconds, tier }, s), [seconds, tier])
   const list = useApi((s) => api.get<AiVideo[]>('/ai-videos', undefined, s), [])
+  const plan = useApi((s) => api.get<VideoPlan>('/ai-videos/plan', undefined, s), [])
+  const [planBusy, setPlanBusy] = useState(false)
   if (role === 'minor') return <Callout tone="neutral" icon={<Lock />} title="Not available">AI video is only available to under-18s inside a guardian-approved contract.</Callout>
 
   const generate = async () => {
@@ -141,13 +142,21 @@ export function AIVideo() {
     try {
       await api.post('/ai-videos', { script, seconds, tier, payment_method: (quote.data?.price_cents ?? 0) > 0 ? 'tok_visa' : null })
       toast('Generating your video', 'Jobs over 10 minutes notify you when done. If it fails, you get a retry or an automatic refund.')
-      setScript(''); list.reload(); quote.reload()
+      setScript(''); list.reload(); quote.reload(); plan.reload()
     } catch (e) { toast('Couldn’t start', errMsg(e), 'danger') } finally { setBusy(false) }
+  }
+  const planAction = async (action: 'subscribe' | 'cancel') => {
+    setPlanBusy(true)
+    try {
+      if (action === 'subscribe') { await api.post('/ai-videos/plan', { payment_method: 'tok_visa' }); toast('Video plan started', '15 videos this month, up to 2 minutes each.') }
+      else { await api.del('/ai-videos/plan'); toast('Plan cancelled', 'Your videos stay usable until the month ends.') }
+      plan.reload(); quote.reload()
+    } catch (e) { toast('Couldn’t update the plan', errMsg(e), 'danger') } finally { setPlanBusy(false) }
   }
   const download = async (id: string) => {
     try {
-      const r = await api.get<{ url: string }>(`/ai-videos/${id}/download`)
-      window.open(r.url, '_blank', 'noopener')
+      const r = await api.get<{ download: string }>(`/ai-videos/${id}/download`)
+      window.open(mediaUrl(r.download), '_blank', 'noopener')
     } catch (e) { toast('Not ready yet', errMsg(e), 'warn') }
   }
   const q = quote.data
@@ -164,7 +173,7 @@ export function AIVideo() {
                 {(['standard', 'premium'] as const).map((t) => (
                   <button key={t} onClick={() => setTier(t)} className={cn('rounded-2xl border p-3 text-left transition', tier === t ? 'border-brand bg-brand-soft' : 'border-line hover:bg-wash')}>
                     <div className="text-[14px] font-bold text-ink capitalize">{t}</div>
-                    <div className="text-[12px] text-ink-2">{t === 'standard' ? '$3' : '$25'}/min{t === 'premium' && ' · brand quality'}</div>
+                    <div className="text-[12px] text-ink-2">{t === 'standard' ? '$3/min or your plan' : '$25/min · brand quality'}</div>
                   </button>
                 ))}
               </div>
@@ -172,13 +181,30 @@ export function AIVideo() {
             <div>
               <div className="mb-2 text-[13px] font-semibold text-ink">Length: <span className="num">{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</span></div>
               <input type="range" min={15} max={300} step={15} value={seconds} onChange={(e) => setSeconds(+e.target.value)} className="w-full accent-[var(--brand)]" />
+              {q && q.plan_videos_applied > 0 && <div className="mt-2 text-[12px] font-semibold text-teal">Uses {q.plan_videos_applied} of your plan videos ({q.plan_videos_left_after} left after)</div>}
               {q && q.free_seconds_applied > 0 && <div className="mt-2 text-[12px] font-semibold text-teal">{q.free_seconds_applied}s free this month (subscriber)</div>}
             </div>
           </div>
           <div className="mt-6 flex items-center justify-between rounded-2xl bg-surface-2 p-4">
-            <div><div className="text-[12px] text-ink-2">Paid before generation</div><div className="text-[24px] font-extrabold text-ink num">{q ? usd(q.price_cents / 100) : '—'}</div></div>
+            <div><div className="text-[12px] text-ink-2">{q && q.plan_videos_applied > 0 ? 'Covered by your plan' : 'Paid before generation'}</div><div className="text-[24px] font-extrabold text-ink num">{q ? usd(q.price_cents / 100) : '—'}</div></div>
             <Button size="lg" icon={<Sparkles className="size-4" />} loading={busy} disabled={script.trim().length < 10 || !q} onClick={generate}>{q && q.price_cents > 0 ? 'Pay & generate' : 'Generate'}</Button>
           </div>
+        </Card>
+        <div className="space-y-6">
+        <Card className="p-5">
+          <div className="flex items-center justify-between"><span className="text-[15px] font-bold text-ink">Video plan</span>{plan.data?.active && <Badge tone="teal">{plan.data.cancel_at_period_end ? `Ends ${date(plan.data.renews_at!)}` : `Renews ${date(plan.data.renews_at!)}`}</Badge>}</div>
+          <div className="mt-2 flex items-baseline gap-1"><span className="text-[32px] font-extrabold tracking-[-0.03em] text-ink num">{usd((plan.data?.terms.price_cents ?? 3000) / 100)}</span><span className="text-ink-2">/mo</span></div>
+          <div className="text-[13px] text-ink-2">{plan.data?.terms.videos ?? 15} videos for {plan.data?.terms.minutes_per_video ?? 2} min length each · standard quality</div>
+          <p className="mt-2 text-[12px] text-ink-3">Longer videos use one per started 2 minutes, so a 5-minute video uses 3.</p>
+          {plan.data?.active ? (
+            <>
+              <div className="mt-4 text-[13.5px] font-semibold text-ink"><span className="num">{plan.data.videos_left}</span> of {plan.data.terms.videos} videos left this month</div>
+              <Progress className="mt-2" value={plan.data.videos_left ?? 0} max={plan.data.terms.videos} tone="teal" />
+              {plan.data.cancel_at_period_end
+                ? <Button className="mt-4 w-full" variant="outline" loading={planBusy} onClick={() => planAction('subscribe')}>Keep my plan</Button>
+                : <Button className="mt-4 w-full" variant="ghost" loading={planBusy} onClick={() => planAction('cancel')}>Cancel plan</Button>}
+            </>
+          ) : <Button className="mt-4 w-full" loading={planBusy} onClick={() => planAction('subscribe')}>Get the plan</Button>}
         </Card>
         <Card>
           <CardHeader title="Your AI videos" subtitle="Labeled AI-generated on Wamiwa, watermarked when downloaded." />
@@ -193,6 +219,7 @@ export function AIVideo() {
             {list.data && list.data.length === 0 && <li className="px-5 py-8 text-center text-[13px] text-ink-2">No videos yet.</li>}
           </ul>
         </Card>
+        </div>
       </div>
     </div>
   )
@@ -242,61 +269,93 @@ export function AutoReply() {
 
 /* ── SB-01 Subscription ─────────────────────────────────────────────────── */
 
-interface SubDto { subscribed: boolean; status: string; period: 'monthly' | 'yearly' | null; renews_at: string | null; ends_at: string | null }
-interface Plans { monthly: { usd_cents: number; local: number }; yearly: { usd_cents: number; local: number } }
+type Tier = 'standard' | 'pro'
+interface SubDto { subscribed: boolean; status: string; period: 'monthly' | 'yearly' | null; tier?: Tier; next_tier?: Tier | null; renews_at: string | null; ends_at: string | null }
+interface Price { usd_cents: number; local: number }
+interface TierDto { name: string; features: string[]; monthly: Price; yearly: Price }
+interface Plans { monthly: Price; yearly: Price; tiers: Record<Tier, TierDto> }
 
 export function Subscription() {
   const { refreshMe, me } = useSession()
   const sub = useApi((s) => api.get<SubDto>('/subscriptions', undefined, s), [])
   const plans = useApi((s) => api.get<Plans>('/subscriptions/plans', undefined, s), [])
   const [cycle, setCycle] = useState<'monthly' | 'yearly'>('monthly')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
   if (sub.error) return <ErrorState error={sub.error} onRetry={sub.reload} />
   if (!sub.data || !plans.data) return <Spinner />
-  const p = plans.data[cycle]
   const s = sub.data
-  const active = s.subscribed && !s.ends_at
-  const act = async () => {
-    setBusy(true)
-    try {
-      if (active) { await api.del('/subscriptions'); toast('Subscription cancelled', 'Extras stay on until the end of the paid period.') }
-      else { await api.post('/subscriptions', { payment_method: 'tok_visa', period: cycle }); toast('Subscribed!', 'Daily ideas start tomorrow morning.') }
-      sub.reload(); void refreshMe()
-    } catch (e) { toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(false) }
+  const current: Tier | null = s.subscribed ? (s.tier ?? 'standard') : null
+  const cancelled = !!s.ends_at
+  const period = current ? (s.period ?? 'monthly') : cycle
+  const run = async (key: string, call: () => Promise<unknown>, title: string, body?: string) => {
+    setBusy(key)
+    try { await call(); toast(title, body); sub.reload(); void refreshMe() } catch (e) { toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(null) }
   }
+  const subscribe = (tier: Tier) => run(tier, () => api.post('/subscriptions', { payment_method: 'tok_visa', period: cycle, tier }), 'Subscribed!', tier === 'pro' ? 'Your partner suggestions are ready.' : 'Daily ideas start tomorrow morning.')
+  const change = (tier: Tier) => run(tier, () => api.patch('/subscriptions', { payment_method: 'tok_visa', tier }),
+    tier === 'pro' ? 'Upgraded to Pro' : current === 'pro' && s.next_tier ? 'Staying on Pro' : 'Switching to Creator',
+    tier === 'pro' ? (s.next_tier ? 'Your plan stays on Pro.' : 'You paid only the difference for the days left.') : `Pro stays on until ${date(s.renews_at!)}.`)
   const rows = [
-    ['Accept & decline offers, get paid', 'Yes', 'Yes', 'Unaffected'],
-    ['Daily post ideas', '—', 'Yes', 'Stops next day'],
-    ['Contact companies first about likeness', '—', 'Yes', 'Can still reply'],
-    ['Agent auto-replies', '—', 'Yes', 'Stops (1-day notice)'],
-    ['Paid AI video', '$3 / $25 per min', '1 free std minute / mo', 'Unaffected'],
-    ['Subscriber badge on your profile', '—', 'Yes, with a verified ID', 'Removed'],
+    ['Accept & decline offers, get paid', 'Yes', 'Yes', 'Yes'],
+    ['Daily post ideas', '—', 'Yes', 'Yes'],
+    ['Contact companies first about likeness', '—', 'Yes', 'Yes'],
+    ['Agent auto-replies', '—', 'Yes', 'Yes'],
+    ['Paid AI video', '$3 / $25 per min', '1 free std min / mo', '1 free std min / mo'],
+    ['Subscriber badge (with a verified ID)', '—', 'Yes', 'Yes'],
+    ['Up to 50 businesses to partner with', '—', '—', 'Yes'],
+    ['Content ideas for countries you choose', '—', '—', 'Yes'],
+    ['Hire agents to summarize your chats', '—', '—', 'Yes'],
   ]
   const idVerified = me.verification !== 'none'
   return (
     <div>
-      <PageHeader title="Subscription" subtitle="One plan. A lapsed subscription only switches off extras. It never cancels paid contracts or blocks earnings." />
-      <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
-        <Card className="bg-ink p-7 !ring-0 text-bg">
-          <div className="flex items-center justify-between"><span className="text-[14px] font-bold opacity-70">Creator</span>{s.subscribed && <Badge tone="teal">{s.ends_at ? `Ends ${date(s.ends_at)}` : s.renews_at ? `Renews ${date(s.renews_at)}` : 'Active'}</Badge>}</div>
-          {!active && <Segmented className="mt-5 !border-white/15 !bg-white/5 [&_button]:!text-white/70 [&_[aria-selected=true]]:!bg-white/15 [&_[aria-selected=true]]:!text-white" value={cycle} onChange={setCycle} options={[{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly · 2 months free' }]} />}
-          <div className="mt-6 flex items-baseline gap-2"><span className="text-[52px] leading-none font-extrabold tracking-[-0.04em] num">{usd(p.usd_cents / 100)}</span><span className="opacity-70">/{cycle === 'monthly' ? 'month' : 'year'}</span></div>
-          <div className="mt-1 text-[13px] opacity-60">Charged as {naira(p.local)} at today’s rate</div>
-          <Button className="mt-7 w-full" variant={active ? 'secondary' : 'primary'} loading={busy} onClick={act}>{active ? 'Cancel subscription' : 'Subscribe'}</Button>
-        </Card>
-        <Card>
-          <table className="w-full text-[13.5px]">
-            <thead><tr className="border-b border-line text-left text-[12px] text-ink-2"><th className="px-5 py-3 font-semibold">Feature</th><th className="px-3 font-semibold">Free</th><th className="px-3 font-semibold">Subscribed</th><th className="px-5 font-semibold">If it lapses</th></tr></thead>
-            <tbody className="divide-y divide-line">{rows.map((r) => <tr key={r[0]}><td className="px-5 py-3 font-semibold text-ink">{r[0]}</td><td className="px-3 text-ink-2">{r[1]}</td><td className="px-3 font-semibold text-ink"><span className="flex items-center gap-1.5">{r[2] === 'Yes' && <Check className="size-4 text-teal" />}{r[2]}</span></td><td className="px-5 text-ink-2">{r[3]}</td></tr>)}</tbody>
-          </table>
-          {s.subscribed && !idVerified && (
-            <Callout className="mx-5 mt-5" tone="warn" icon={<Star />} action={<Button size="sm" to="/app/verify">Verify ID</Button>}>
-              Verify your ID to show your Subscriber badge. It only appears on verified accounts, so it always means a real person.
-            </Callout>
-          )}
-          <p className="p-5 text-[12.5px] text-ink-3">The Wamiwa Agent plan and brand video plans are separate purchases.</p>
-        </Card>
+      <PageHeader title="Subscription" subtitle="Two plans. A lapsed subscription only switches off extras. It never cancels paid contracts or blocks earnings." />
+      {!current && (
+        <Segmented className="mb-5" value={cycle} onChange={setCycle} options={[{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly · 2 months free' }]} />
+      )}
+      <div className="grid gap-5 md:grid-cols-2">
+        {(['standard', 'pro'] as Tier[]).map((tier) => {
+          const t = plans.data!.tiers[tier]
+          const price = t[period]
+          const isCurrent = current === tier
+          const pending = current === 'pro' && tier === 'standard' && s.next_tier === 'standard'
+          return (
+            <Card key={tier} className={cn('flex flex-col p-6', tier === 'pro' && 'bg-ink !ring-0 text-bg')}>
+              <div className="flex items-center justify-between">
+                <span className={cn('text-[15px] font-bold', tier === 'pro' ? 'opacity-80' : 'text-ink')}>{t.name}</span>
+                {isCurrent && <Badge tone="teal">{cancelled ? `Ends ${date(s.ends_at!)}` : s.next_tier && s.next_tier !== tier ? `Until ${date(s.renews_at!)}` : `Renews ${date(s.renews_at!)}`}</Badge>}
+                {pending && <Badge tone="warn">From {date(s.renews_at!)}</Badge>}
+              </div>
+              <div className="mt-4 flex items-baseline gap-2"><span className="text-[44px] leading-none font-extrabold tracking-[-0.04em] num">{usd(price.usd_cents / 100)}</span><span className={tier === 'pro' ? 'opacity-70' : 'text-ink-2'}>/{period === 'monthly' ? 'month' : 'year'}</span></div>
+              <div className={cn('mt-1 text-[12.5px]', tier === 'pro' ? 'opacity-60' : 'text-ink-3')}>Charged as {naira(price.local)} at today’s rate</div>
+              <ul className="mt-5 flex-1 space-y-2">
+                {t.features.map((f) => <li key={f} className={cn('flex gap-2 text-[13.5px]', tier === 'pro' ? 'opacity-90' : 'text-ink-2')}><Check className={cn('mt-0.5 size-4 shrink-0', tier === 'pro' ? 'text-brand' : 'text-teal')} />{f}</li>)}
+              </ul>
+              <div className="mt-6">
+                {!current && <Button className="w-full" variant={tier === 'pro' ? 'primary' : 'outline'} loading={busy === tier} onClick={() => subscribe(tier)}>Subscribe to {t.name}</Button>}
+                {current && !isCurrent && !cancelled && (tier === 'pro'
+                  ? <Button className="w-full" loading={busy === tier} onClick={() => change('pro')}>Upgrade to Pro</Button>
+                  : pending ? <Button className="w-full" variant="secondary" loading={busy === 'pro'} onClick={() => change('pro')}>Keep Pro instead</Button>
+                    : <Button className="w-full" variant="outline" loading={busy === tier} onClick={() => change('standard')}>Switch to Creator at renewal</Button>)}
+                {isCurrent && !cancelled && <Button className="w-full" variant={tier === 'pro' ? 'secondary' : 'outline'} loading={busy === 'cancel'} onClick={() => run('cancel', () => api.del('/subscriptions'), 'Subscription cancelled', 'Extras stay on until the end of the paid period.')}>Cancel subscription</Button>}
+                {isCurrent && tier === 'pro' && <Button className="mt-2 w-full" variant="link" to="/app/grow">Open Pro tools</Button>}
+              </div>
+            </Card>
+          )
+        })}
       </div>
+      {s.subscribed && !idVerified && (
+        <Callout className="mt-5" tone="warn" icon={<Star />} action={<Button size="sm" to="/app/verify">Verify ID</Button>}>
+          Verify your ID to show your Subscriber badge. It only appears on verified accounts, so it always means a real person.
+        </Callout>
+      )}
+      <Card className="mt-6 overflow-x-auto">
+        <table className="w-full min-w-[520px] text-[13.5px]">
+          <thead><tr className="border-b border-line text-left text-[12px] text-ink-2"><th className="px-5 py-3 font-semibold">Feature</th><th className="px-3 font-semibold">Free</th><th className="px-3 font-semibold">Creator</th><th className="px-5 font-semibold">Pro</th></tr></thead>
+          <tbody className="divide-y divide-line">{rows.map((r) => <tr key={r[0]}><td className="px-5 py-3 font-semibold text-ink">{r[0]}</td>{r.slice(1).map((v, i) => <td key={i} className={cn(i === 2 ? 'px-5' : 'px-3', v === 'Yes' ? 'font-semibold text-ink' : 'text-ink-2')}><span className="flex items-center gap-1.5">{v === 'Yes' && <Check className="size-4 text-teal" />}{v}</span></td>)}</tr>)}</tbody>
+        </table>
+        <p className="p-5 text-[12.5px] text-ink-3">Upgrading to Pro starts now and costs only the difference for the days left. Moving back to Creator takes effect at renewal. If a subscription lapses, extras switch off; paid contracts and earnings are never affected. The Wamiwa Agent plan and brand video plans are separate purchases.</p>
+      </Card>
     </div>
   )
 }

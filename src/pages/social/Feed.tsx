@@ -10,6 +10,7 @@ import { compact } from '@/lib/format'
 import { useSession } from '@/context/session'
 import { Avatar, Button, Card, Segmented, toast } from '@/components/ui/primitives'
 import { AgentPostCard, PostCard } from '@/components/social/PostCard'
+import { ForYou } from '@/components/social/ForYou'
 import { VerifiedMark } from '@/components/social/labels'
 import { ErrorState, LoadMore, PostSkeleton } from '@/components/ui/states'
 
@@ -50,6 +51,8 @@ export default function Feed() {
             </div>
           </div>
         )}
+
+        {feed === 'people' && <ForYou />}
 
         {list.error ? (
           <ErrorState error={list.error} onRetry={list.reload} />

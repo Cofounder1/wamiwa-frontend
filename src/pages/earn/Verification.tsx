@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Award, BadgeCheck, BookOpen, Briefcase, Camera, Check, CreditCard, Crown, IdCard, Landmark, Link2, Mic2, Newspaper, Plane, ScanFace, ShieldCheck, Upload,
+  Award, BadgeCheck, BookOpen, Briefcase, Camera, Check, CreditCard, Crown, IdCard, Landmark, Link2, Mic2, Newspaper, Plane, ShieldCheck, Upload,
 } from 'lucide-react'
-import { api, ApiError } from '@/api/client'
+import { api, errMsg } from '@/api/client'
 import { useApi } from '@/api/hooks'
 import { useSession } from '@/context/session'
 import { compact, date } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import { Badge, Button, Callout, Card, CardHeader, Field, Input, Modal, PageHeader, Progress, Select, Tabs, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
+import { LiveCheck, type LiveCapture } from '@/components/ui/LiveCheck'
 
 type Tab = 'id' | 'bank' | 'social' | 'public'
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
 async function upload(kind: string, f: File) {
   const form = new FormData(); form.append('kind', kind); form.append('file', f)
   return (await api.upload<{ ref: string }>('/uploads', form)).ref
@@ -42,7 +42,7 @@ function IdentityTab() {
   const res = useApi((s) => api.get<IdStatus>('/verification/identity', undefined, s), [])
   const [doc, setDoc] = useState<'national_id' | 'drivers_licence' | 'passport'>('national_id')
   const [docFile, setDocFile] = useState<File>()
-  const [selfie, setSelfie] = useState<File>()
+  const [live, setLive] = useState<LiveCapture>()
   const [busy, setBusy] = useState(false)
   if (res.error) return <ErrorState error={res.error} onRetry={res.reload} />
   if (!res.data) return <Spinner />
@@ -50,10 +50,11 @@ function IdentityTab() {
   const submit = async () => {
     setBusy(true)
     try {
-      const [document_ref, selfie_ref] = await Promise.all([upload('id_document', docFile!), upload('image', selfie!)])
-      const r = await api.post<{ status: string; reason?: string }>('/verification/identity', { document_type: doc, document_ref, selfie_ref })
+      // The live check is uploaded as private files: never shown back to anyone.
+      const [document_ref, selfie_ref, liveness_ref] = await Promise.all([upload('id_document', docFile!), upload('liveness', live!.frame), upload('liveness', live!.clip)])
+      const r = await api.post<{ status: string; reason?: string }>('/verification/identity', { document_type: doc, document_ref, selfie_ref, liveness_ref })
       toast(r.status === 'passed' ? 'Identity verified' : 'Submitted', r.status === 'passed' ? 'You can now earn on Wamiwa.' : r.reason ?? 'We’ll let you know the result.')
-      setDocFile(undefined); setSelfie(undefined); res.reload(); void refreshMe()
+      setDocFile(undefined); setLive(undefined); res.reload(); void refreshMe()
     } catch (e) { toast('Verification failed', errMsg(e), 'danger') } finally { setBusy(false) }
   }
   return (
@@ -78,9 +79,9 @@ function IdentityTab() {
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               <label className={cn('flex cursor-pointer flex-col items-center gap-1 rounded-2xl border-2 border-dashed py-6 text-[13px]', docFile ? 'border-teal bg-teal-soft text-teal' : 'border-line-strong text-ink-2 hover:border-brand')}><Upload className="size-5" />{docFile ? docFile.name : 'Photo of the document'}<span className="text-[11.5px] opacity-70">Front, no glare</span><input type="file" accept="image/*,.pdf" className="sr-only" onChange={(e) => setDocFile(e.target.files?.[0])} /></label>
-              <label className={cn('flex cursor-pointer flex-col items-center gap-1 rounded-2xl border-2 border-dashed py-6 text-[13px]', selfie ? 'border-teal bg-teal-soft text-teal' : 'border-line-strong text-ink-2 hover:border-brand')}><ScanFace className="size-5" />{selfie ? selfie.name : 'Liveness selfie'}<span className="text-[11.5px] opacity-70">Face the camera, good light</span><input type="file" accept="image/*" capture="user" className="sr-only" onChange={(e) => setSelfie(e.target.files?.[0])} /></label>
+              <LiveCheck value={live} onChange={setLive} />
             </div>
-            <Button className="mt-5" icon={<Camera className="size-4" />} disabled={!docFile || !selfie} loading={busy} onClick={submit}>Submit for verification</Button>
+            <Button className="mt-5" icon={<Camera className="size-4" />} disabled={!docFile || !live} loading={busy} onClick={submit}>Submit for verification</Button>
           </>
         )}
       </Card>

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Bot, Info, Repeat2, ShieldCheck, Timer } from 'lucide-react'
 import { acc } from '@/data/mock'
@@ -17,7 +18,9 @@ export default function PostDetail() {
   const { id } = useParams()
   const { me, agentComments, setAgentComments } = useSession()
   const res = useApi((s) => api.get<PostDto>(`/posts/${id}`, undefined, s).then(fromPost), [id])
-  const post = res.data
+  const [delta, setDelta] = useState(0)  // comments added or deleted on this page since it loaded
+  useEffect(() => setDelta(0), [id])
+  const post = res.data && { ...res.data, comments: Math.max(0, res.data.comments + delta) }
 
   if (res.error) return <ErrorState error={res.error} onRetry={res.reload} />
   if (!post) return <div className="mx-auto max-w-[680px]"><PostSkeleton /></div>
@@ -41,7 +44,7 @@ export default function PostDetail() {
               </div>
             )}
           </div>
-          <CommentThread postId={post.id} postAuthorId={post.authorId} variant={isAgentPost ? 'agents' : 'people'} />
+          <CommentThread postId={post.id} postAuthorId={post.authorId} variant={isAgentPost ? 'agents' : 'people'} onCountChange={(d) => setDelta((x) => x + d)} />
         </section>
       </div>
 

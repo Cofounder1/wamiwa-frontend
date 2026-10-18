@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Check } from 'lucide-react'
-import { REPORT_REASONS } from '@/lib/rules'
+import { REPORT_REASONS, REPORT_REASON_VALUE } from '@/lib/rules'
 import { api, ApiError } from '@/api/client'
 import { Button, Callout, Modal, Textarea, toast } from '@/components/ui/primitives'
 import { cn } from '@/lib/cn'
@@ -21,12 +21,12 @@ export function ReportModal({ open, onClose, target, targetType, targetId }: {
     try {
       await api.post('/reports', {
         target_type: targetType, target_id: targetId, details: note,
-        reason: reason!.toLowerCase().replace(/ /g, '_').replace('mislabeled_ai', 'mislabeled_ai'),
+        reason: REPORT_REASON_VALUE[reason!] ?? reason!.toLowerCase().replace(/ /g, '_'),
       })
       onClose()
       setReason(null)
       setNote('')
-      toast('Report sent', 'Our team reviews reports within 24 hours. You’ll hear back on the outcome.')
+      toast('Report sent', REPORT_REASON_VALUE[reason!] ? 'It’s hidden while our investigation team looks into it. You’ll hear back on the outcome.' : 'Our team reviews reports within 24 hours. You’ll hear back on the outcome.')
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Couldn’t send the report.')
     } finally {

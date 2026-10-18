@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Camera, ChevronRight, Download, FileUp, HelpCircle, KeyRound, Lock, Plus, Search, Send, ShieldCheck, Ticket, Trash2 } from 'lucide-react'
-import { api, ApiError } from '@/api/client'
+import { api, errMsg } from '@/api/client'
 import { useApi } from '@/api/hooks'
 import { useSession } from '@/context/session'
 import { date, dateTime } from '@/lib/format'
@@ -13,8 +13,6 @@ import { OtpInput } from '@/pages/auth/Signup'
 import { RegionSelect } from '@/components/ui/RegionPicker'
 
 type Tab = 'profile' | 'notifications' | 'privacy' | 'blocked' | 'delete'
-const errMsg = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong')
-
 export default function Settings() {
   const [params] = useSearchParams()
   const [tab, setTab] = useState<Tab>((params.get('tab') as Tab) ?? 'profile')
