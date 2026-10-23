@@ -11,6 +11,7 @@ import { Avatar, Kbd } from '@/components/ui/primitives'
 import { VerifiedMark, WhoTag } from '@/components/social/labels'
 import { ADMIN_NAV, NAV } from './nav'
 import { cn } from '@/lib/cn'
+import { searchTerm } from '@/lib/format'
 import type { Account } from '@/data/types'
 
 type Row = { key: string; label: string; sub?: string; to: string; account?: Account }
@@ -23,7 +24,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const [query, setQuery] = useState('')
   const [i, setI] = useState(0)
   const nav = useNavigate()
-  useEffect(() => { const t = setTimeout(() => setQuery(q.trim()), 250); return () => clearTimeout(t) }, [q])
+  useEffect(() => { const t = setTimeout(() => setQuery(searchTerm(q)), 250); return () => clearTimeout(t) }, [q])
   const search = useApi(open && !isAdmin && query.length > 1 ? (s) => Promise.all(TABS.map((tab) => api.page<SearchHitDto>('/search', { q: query, tab, limit: 4 }, s).then((p) => p.data.map((h) => fromSearchHit(h, tab))))).then((r) => r.flat()) : null, [query, open, isAdmin])
 
   const rows = useMemo<Row[]>(() => {

@@ -57,6 +57,13 @@ interface Session {
   setSponsoredCardsOff: (v: boolean) => void
   agentComments: 'all' | 'following' | 'none'
   setAgentComments: (v: 'all' | 'following' | 'none') => void
+  /** Videos play by themselves (muted) when scrolled into view or hovered. Saved on this device. */
+  autoplay: boolean
+  setAutoplay: (v: boolean) => void
+  /** Ids of the agents this person owns; owners can delete anything their agents posted (FD-08). */
+  myAgentIds: Set<string>
+  /** Whether this person can delete a post or comment by this author: their own, or their agent's. */
+  canManage: (authorId: string) => boolean
   /** Last API error from a background action, for a toast. */
   onError: (e: unknown) => void
 }
@@ -116,15 +123,19 @@ export function SessionProvider({ children, onError }: { children: ReactNode; on
   const [subscribed, setSubscribedState] = useState(false)
   const [sponsoredCardsOff, setSponsoredOff] = useState(false)
   const [agentComments, setAgentCommentsState] = useState<'all' | 'following' | 'none'>('all')
+  const [autoplay, setAutoplayState] = useState<boolean>(() => load('autoplay', false))
+  const [myAgentIds, setMyAgentIds] = useState<Set<string>>(new Set())
   const report = useCallback((e: unknown) => onError?.(e), [onError])
 
   const hydrate = useCallback(async (): Promise<Role | undefined> => {
     try {
       const me = await api.get<MeDto>('/accounts/me')
-      const [r, follows, blocks] = await Promise.all([
+      const people = !me.admin_role && me.type !== 'company'
+      const [r, follows, blocks, agents] = await Promise.all([
         deriveRole(me),
         api.page<{ id: string }>('/follows/following', { limit: 100 }).then((p) => p.data).catch(() => []),
         api.get<{ id?: string; account_id?: string }[]>('/blocks').catch(() => []),
+        people && !me.profile?.is_minor ? api.get<{ id: string }[]>('/agents').catch(() => []) : Promise.resolve([]),
       ])
       setMeDto(me)
       setRole(r)
@@ -133,6 +144,7 @@ export function SessionProvider({ children, onError }: { children: ReactNode; on
       setAgentCommentsState(policyIn[me.profile?.agent_comment_policy ?? 'all'])
       setFollowing(new Set(follows.map((f) => f.id)))
       setBlocked(new Set(blocks.map((b) => (b.account_id ?? b.id)!)))
+      setMyAgentIds(new Set(agents.map((a) => a.id)))
       setFeedState(me.feed_preference)
       setStatus('ready')
       return r
@@ -225,9 +237,13 @@ export function SessionProvider({ children, onError }: { children: ReactNode; on
       setAgentCommentsState(v)
       api.patch('/accounts/me/settings', { agent_comment_policy: policyOut[v] }).catch((e) => { setAgentCommentsState(prev); report(e) })
     },
+    autoplay,
+    setAutoplay: (v) => { setAutoplayState(v); save('autoplay', v) },
+    myAgentIds,
+    canManage: (authorId) => authorId === meDto?.id || myAgentIds.has(authorId),
     onError: report,
   }), [status, role, meDto, login, logout, signInWith, hydrate, subscribed, theme, setTheme, feed, setFeed, posts, following, blocked,
-    liked, sponsoredCardsOff, agentComments, toggleRemote, report])
+    liked, sponsoredCardsOff, agentComments, autoplay, myAgentIds, toggleRemote, report])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

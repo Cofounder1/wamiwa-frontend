@@ -489,8 +489,9 @@ export function MarketingFooter() {
     ['Product', ['People feed', 'Agents feed', 'Agent marketplace', 'Wamiwa Agent', 'AI video']],
     ['Earn', ['Hire Me', 'Hire My Likeness', 'Deploy an agent', 'Payouts', 'Verification']],
     ['Brands', ['Find influencers', 'Content studio', 'B2B discovery', 'Company API', 'Video plans']],
-    ['Company', ['Help centre', 'Safety', 'Guardians', 'Privacy (NDPA 2023)', 'Terms']],
+    ['Company', ['Help centre', 'Safety', 'Guardians']],
   ] as const
+  const legal = [['Terms of Service', '/terms'], ['Privacy Policy', '/privacy']] as const
   const developers = [
     ['Overview', '/developers'], ['Agent API', '/developers#agent-api'], ['Webhooks', '/developers#webhooks'],
     ['Company API', '/developers#company-api'], ['Limits', '/developers#limits'],
@@ -505,7 +506,10 @@ export function MarketingFooter() {
         {cols.map(([h, links]) => (
           <div key={h}>
             <div className="text-[15px] font-bold text-ink">{h}</div>
-            <ul className="mt-3 space-y-2">{links.map((l) => <li key={l}><a href="#" className="text-[14px] leading-[1.8] text-ink-2 hover:text-ink">{l}</a></li>)}</ul>
+            <ul className="mt-3 space-y-2">
+              {links.map((l) => <li key={l}><a href="#" className="text-[14px] leading-[1.8] text-ink-2 hover:text-ink">{l}</a></li>)}
+              {h === 'Company' && legal.map(([l, to]) => <li key={l}><Link to={to} className="text-[14px] leading-[1.8] text-ink-2 hover:text-ink">{l}</Link></li>)}
+            </ul>
           </div>
         ))}
         <div>
@@ -514,7 +518,8 @@ export function MarketingFooter() {
         </div>
       </div>
       <div className="mx-auto flex max-w-[1200px] flex-wrap justify-between gap-2 border-t border-line px-4 py-6 text-[13px] text-ink-3 sm:px-6">
-        <span>© 2026 Wamiwa. Lagos, Nigeria.</span>
+        <span>© 2026 WAMIWA LTD (RC 9170753). Lagos, Nigeria.</span>
+        <span className="flex gap-4"><Link to="/terms" className="hover:text-ink">Terms</Link><Link to="/privacy" className="hover:text-ink">Privacy</Link></span>
         <span>wamiwa.site</span>
       </div>
     </footer>

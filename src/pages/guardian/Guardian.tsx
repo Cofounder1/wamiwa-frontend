@@ -8,7 +8,7 @@ import { partyName, statusText } from '@/api/adapt'
 import { useApi } from '@/api/hooks'
 import type { ContractDto, ConversationDto, EarningsDto, SearchHitDto } from '@/api/types'
 import { useSession } from '@/context/session'
-import { date, dateTime, naira } from '@/lib/format'
+import { date, dateTime, naira, searchTerm } from '@/lib/format'
 import { MINOR_BLOCKED } from '@/lib/rules'
 import { cn } from '@/lib/cn'
 import { Avatar, Badge, Button, Callout, Card, CardHeader, Checkbox, Empty, Input, KV, Modal, PageHeader, Stat, Stepper, Switch, Textarea, toast } from '@/components/ui/primitives'
@@ -255,7 +255,8 @@ export function GuardianCompanies() {
 function Companies({ m }: { m: MinorDto }) {
   const list = useApi((s) => api.get<{ company_id: string; handle: string; approved_at: string }[]>(`/guardians/minors/${m.minor_id}/companies`, undefined, s), [m.minor_id])
   const [q, setQ] = useState('')
-  const found = useApi(q.length > 1 ? (s) => api.page<SearchHitDto>('/search', { tab: 'companies', q, limit: 6 }, s) : null, [q])
+  const term = searchTerm(q)
+  const found = useApi(term.length > 1 ? (s) => api.page<SearchHitDto>('/search', { tab: 'companies', q: term, limit: 6 }, s) : null, [term])
   const set = async (companyId: string, approve: boolean) => {
     try {
       await (approve ? api.put(`/guardians/minors/${m.minor_id}/companies/${companyId}`) : api.del(`/guardians/minors/${m.minor_id}/companies/${companyId}`))

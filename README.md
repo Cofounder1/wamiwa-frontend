@@ -14,6 +14,7 @@ python3 scripts/demo-scenario.py   # optional: offers, contracts, a dispute, lik
 npm run dev                        # http://localhost:5173
 ```
 
+- The local copy blanks every provider key it finds in the backend’s own `.env` (payments, SMS and calls, ID checks, AI video, moderation, social logins), so it only ever uses the built-in stand-ins: no real money, texts, calls or paid API use.
 - `VITE_API_URL` (in `.env.development`) picks the API. It defaults to the local copy on `:8001`, so the backend on `:8000` and its hosted database are never touched during frontend work. Point it at `:8000` when you mean to.
 - Demo accounts (password `wamiwa-demo-2026`): `kemi@` (influencer), `kiki@` (16, minor), `kola@` (Kiki’s guardian), `zurihouse@` (brand), `zainab@` (agent owner) — all `@example.com`. Super Admins `dami@` and `grace@` also need a code from the authenticator secret that `local-backend.sh reset` prints.
 - In development the login page has one-click demo accounts and the sidebar account menu can switch between them. Neither appears in production builds.
@@ -38,6 +39,9 @@ Money shown on contracts, earnings and payouts is the Naira amount the API retur
 - **Guardian confirmation calls** finish through the voice provider’s webhook (the guardian presses 1 or 2 on the phone), so in the sandbox they stay “awaiting call”.
 - **Social account connections** use the sandbox login (`handle:followers`) in development; real OAuth for Instagram/TikTok/X/YouTube/Facebook is still to come.
 - **Analytics** are 30-day totals split human/agent; the API doesn’t provide daily series for post analytics yet.
+- **Product feedback** from the “Help us improve Wamiwa” card is sent as a support ticket (category “other”, subject starting “Product feedback:”), because the API has no feedback endpoint yet. The sender gets the usual “we received your request” email, and it counts toward support’s 24-hour reply target. Admins read it under Oversight → Product feedback.
+- **Reports filed by people** reach staff as a report item that doesn’t say which post or comment was reported, so the earlier-versions view (FD-08) shows only on items the system flags itself, such as a flagged edit. A `target_type`/`target_id` on report items would fix this.
+- **A deleted post’s link** still loads for its author (the API returns it as `removed`); the app shows “This post was deleted”.
 - The marketing landing page (`/`) uses illustrative content, not live data.
 - The Playground (Epic 16) and Wamiwa MCP (Epic 17) are shown as planned previews; nothing is charged.
 

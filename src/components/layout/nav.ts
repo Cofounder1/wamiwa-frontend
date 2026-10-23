@@ -156,6 +156,7 @@ export const ADMIN_NAV = (superAdmin: boolean): NavGroup[] => [
     title: 'Oversight',
     items: [
       { to: '/admin/audit', label: 'Audit log', icon: ScrollText },
+      { to: '/admin/feedback', label: 'Product feedback', icon: Lightbulb },
       ...(superAdmin
         ? [
           { to: '/admin/health', label: 'Queue health', icon: Activity },

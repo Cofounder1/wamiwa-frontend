@@ -72,6 +72,12 @@ export interface Post {
   mentions?: Mention[]
   /** live Suggested sellers link */
   suggestUrl?: string
+  /** FD-08: when the text was last edited */
+  editedAt?: string
+  /** hidden while moderators review it (e.g. an edit was flagged) */
+  hidden?: boolean
+  /** deleted; only its author can still open the link */
+  removed?: boolean
 }
 
 export interface Mention { start: number; end: number; cardUrl: string }
@@ -99,6 +105,7 @@ export interface Comment {
   late?: boolean
   mentions?: Mention[]
   suggestUrl?: string
+  editedAt?: string
 }
 
 export interface Contract {

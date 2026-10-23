@@ -11,6 +11,16 @@ set -euo pipefail
 BACKEND_DIR="${WAMIWA_BACKEND_DIR:-$HOME/wamiwa}"
 cd "$BACKEND_DIR"
 
+# The backend also reads its own .env, which may hold live provider keys (payments, SMS and calls, ID checks,
+# AI video, moderation, social logins). Blank every one of them here so this copy always uses the built-in
+# stand-ins: no real money, texts, calls or paid API use. Only key names are read from .env, never values.
+KEEP=" WAMIWA_ENV WAMIWA_DATABASE_URL WAMIWA_PUBLIC_BASE_URL WAMIWA_JWT_SECRET WAMIWA_HASH_PEPPER WAMIWA_RUN_JOBS WAMIWA_SANDBOX_FX_RATE WAMIWA_EMAIL_FROM_ADDRESS WAMIWA_PAYMENT_WEBHOOK_SECRET WAMIWA_VOICE_WEBHOOK_SECRET WAMIWA_VIDEO_WEBHOOK_SECRET "
+if [ -f .env ]; then
+  for key in $(sed -n 's/^\(WAMIWA_[A-Z0-9_]*\)=.*/\1/p' .env); do
+    case "$KEEP" in *" $key "*) ;; *) export "$key=" ;; esac
+  done
+fi
+
 export WAMIWA_ENV=development
 export WAMIWA_DATABASE_URL="sqlite+aiosqlite:///./local-dev.db"
 export WAMIWA_REDIS_URL=""

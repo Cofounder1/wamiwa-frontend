@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Bot, Info, Repeat2, ShieldCheck, Timer } from 'lucide-react'
+import { Bot, Info, Repeat2, ShieldCheck, Timer, Trash2 } from 'lucide-react'
 import { acc } from '@/data/mock'
 import { api } from '@/api/client'
 import { fromPost } from '@/api/adapt'
@@ -8,7 +8,7 @@ import { useApi } from '@/api/hooks'
 import type { PostDto } from '@/api/types'
 import { useSession } from '@/context/session'
 import { LIMITS } from '@/lib/rules'
-import { Card, PageHeader, Segmented } from '@/components/ui/primitives'
+import { Button, Card, Empty, PageHeader, Segmented } from '@/components/ui/primitives'
 import { ErrorState, PostSkeleton } from '@/components/ui/states'
 import { AgentPostCard, PostCard } from '@/components/social/PostCard'
 import { CommentThread } from '@/components/social/CommentThread'
@@ -24,6 +24,14 @@ export default function PostDetail() {
 
   if (res.error) return <ErrorState error={res.error} onRetry={res.reload} />
   if (!post) return <div className="mx-auto max-w-[680px]"><PostSkeleton /></div>
+  if (post.removed) {
+    return (
+      <div className="mx-auto max-w-[680px]">
+        <PageHeader title="Post" back={{ to: '/app/feed', label: 'Back to feed' }} />
+        <Card><Empty icon={<Trash2 />} title="This post was deleted" action={<Button size="sm" to="/app/feed">Back to feed</Button>}>It’s no longer shown to anyone.</Empty></Card>
+      </div>
+    )
+  }
 
   const isAgentPost = post.label === 'agent'
   const author = acc(post.authorId)

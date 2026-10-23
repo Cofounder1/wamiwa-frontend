@@ -43,3 +43,8 @@ export const naira = (kobo: number, opts: { compact?: boolean } = {}) =>
   '₦' + new Intl.NumberFormat('en-NG', opts.compact
     ? { notation: 'compact', maximumFractionDigits: 1 }
     : { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(kobo / 100)
+
+/** What to send to /search: people type "@handle", but handles are stored without the @. */
+export function searchTerm(q: string) {
+  return q.trim().replace(/^@+/, '').trim()
+}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowUpRight, Check, Clock, FileText, Hand, KeyRound, Lock, Mail, PlayCircle, Plus, Search, ShieldCheck, Trash2, UserPlus, X } from 'lucide-react'
-import { api, errMsg } from '@/api/client'
+import { api, ApiError, errMsg } from '@/api/client'
 import { partyName } from '@/api/adapt'
 import { useApi, usePaged } from '@/api/hooks'
 import type { ContractDto, MeDto } from '@/api/types'
@@ -11,6 +11,7 @@ import { cn } from '@/lib/cn'
 import { Avatar, Badge, Button, Callout, Card, CardHeader, Checkbox, Empty, Field, Input, KV, Modal, PageHeader, Select, Switch, Tabs, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, LoadMore, RowSkeleton, Spinner } from '@/components/ui/states'
 import { usePerms } from './AdminDashboards'
+import { FEEDBACK_PREFIX } from '@/components/layout/FeedbackPrompt'
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ')
 
@@ -99,6 +100,7 @@ function QueueItemModal({ item, onClose, onChanged }: { item: QueueItemDto; onCl
           <div className="mb-2 text-[12px] font-bold tracking-wide text-ink-3 uppercase">Context</div>
           <div className="rounded-2xl bg-surface-2 p-4 text-[14px] text-ink">{item.summary}</div>
           {context && <pre className="mt-3 max-h-56 overflow-auto rounded-2xl border border-line p-4 font-mono text-[12px] whitespace-pre-wrap text-ink-2">{JSON.stringify(context, null, 2)}</pre>}
+          {(item.target_type === 'post' || item.target_type === 'comment') && <EditHistory type={item.target_type} id={item.target_id} />}
           {mine && !isDispute && (
             <div className="mt-5">
               <div className="mb-2 text-[12px] font-bold tracking-wide text-ink-3 uppercase">Decision</div>
@@ -121,6 +123,100 @@ function QueueItemModal({ item, onClose, onChanged }: { item: QueueItemDto; onCl
         </div>
       </div>
     </Modal>
+  )
+}
+
+interface EditHistoryDto { current_text: string; edited_at: string | null; versions: { text: string; replaced_at: string; editor_id: string }[] }
+
+/** FD-08: staff see every earlier version of an edited post or comment, oldest first. Nobody can change it. */
+function EditHistory({ type, id }: { type: 'post' | 'comment'; id: string }) {
+  const h = useApi((s) => api.get<EditHistoryDto>(`/admin/content/${type}/${id}/edits`, undefined, s), [type, id])
+  if (!h.data?.versions.length) return null
+  return (
+    <div className="mt-5">
+      <div className="mb-2 text-[12px] font-bold tracking-wide text-ink-3 uppercase">Edited {h.data.versions.length}× · earlier versions</div>
+      <ol className="space-y-2">
+        {h.data.versions.map((v, i) => (
+          <li key={i} className="rounded-2xl border border-line p-3 text-[13.5px]">
+            <div className="mb-1 text-[11.5px] font-semibold text-ink-3">Version {i + 1} · replaced {dateTime(v.replaced_at)}</div>
+            <p className="whitespace-pre-wrap text-ink-2">{v.text || <i>No text</i>}</p>
+          </li>
+        ))}
+        <li className="rounded-2xl border border-brand/40 bg-brand-soft/40 p-3 text-[13.5px]">
+          <div className="mb-1 text-[11.5px] font-semibold text-ink-3">Now{h.data.edited_at ? ` · since ${dateTime(h.data.edited_at)}` : ''}</div>
+          <p className="whitespace-pre-wrap text-ink">{h.data.current_text}</p>
+        </li>
+      </ol>
+    </div>
+  )
+}
+
+/* ── Product feedback (from the "Help us improve Wamiwa" card) ───────────── */
+
+interface TicketRow { id: string; number: string; subject: string; status: string; created_at: string }
+
+/** Feedback arrives as support tickets whose subject starts with FEEDBACK_PREFIX; this page picks those out. */
+export function Feedback() {
+  const [rows, setRows] = useState<TicketRow[]>([])
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [error, setError] = useState<ApiError>()
+  const [open, setOpen] = useState<string | null>(null)
+
+  // The ticket list can't be filtered by subject, so read it in pages and keep the feedback.
+  const load = async (from: string | null, reset = false) => {
+    setState('loading')
+    try {
+      let next = from, found: TicketRow[] = [], pages = 0
+      do {
+        const p = await api.page<TicketRow>('/admin/support/tickets', { cursor: next ?? undefined, limit: 50 })
+        found = [...found, ...p.data.filter((t) => t.subject.startsWith(FEEDBACK_PREFIX))]
+        next = p.has_more ? p.next_cursor ?? null : null
+      } while (next && ++pages < 10 && found.length < 25)
+      setRows((r) => [...(reset ? [] : r), ...found])
+      setCursor(next)
+      setState('ready')
+    } catch (e) { setError(e instanceof ApiError ? e : new ApiError(0, 'error', errMsg(e))); setState('error') }
+  }
+  useEffect(() => { void load(null, true) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = [...rows].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))
+
+  return (
+    <div>
+      <PageHeader title="Product feedback" subtitle="What people asked Wamiwa to do for them, from the “Help us improve Wamiwa” card. Newest first." />
+      <Card className="divide-y divide-line">
+        {state === 'error' && error ? <ErrorState compact error={error} onRetry={() => load(null, true)} />
+          : state === 'loading' && !rows.length ? <RowSkeleton />
+            : shown.map((t) => {
+              const [topic, ...rest] = t.subject.slice(FEEDBACK_PREFIX.length).split(' — ')
+              return (
+                <div key={t.id}>
+                  <button onClick={() => setOpen(open === t.id ? null : t.id)} className="flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-surface-2">
+                    <div className="min-w-0 flex-1">
+                      <Badge tone="neutral">{topic}</Badge>
+                      <div className="mt-1 truncate text-[14px] font-semibold text-ink">{rest.join(' — ')}</div>
+                    </div>
+                    <div className="shrink-0 text-right text-[12.5px] text-ink-3">{ago(t.created_at)}<div className="font-mono">{t.number}</div></div>
+                  </button>
+                  {open === t.id && <FeedbackBody id={t.id} />}
+                </div>
+              )
+            })}
+        {state === 'ready' && !rows.length && <Empty icon={<Check />} title="No feedback yet">Ideas people send from the app show up here.</Empty>}
+      </Card>
+      <LoadMore show={!!cursor} loading={state === 'loading'} onClick={() => load(cursor)} />
+    </div>
+  )
+}
+
+function FeedbackBody({ id }: { id: string }) {
+  const t = useApi((s) => api.get<{ messages: { body: string }[] }>(`/admin/support/tickets/${id}`, undefined, s), [id])
+  return (
+    <div className="px-5 pb-4">
+      {t.error ? <ErrorState compact error={t.error} onRetry={t.reload} /> : !t.data ? <Spinner /> : (
+        <p className="rounded-2xl bg-surface-2 p-4 text-[14px] whitespace-pre-wrap text-ink">{t.data.messages[0]?.body}</p>
+      )}
+    </div>
   )
 }
 

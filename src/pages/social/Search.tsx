@@ -1,21 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Search as SearchIcon, SlidersHorizontal } from 'lucide-react'
 import { unsplash as u } from '@/data/art'
 import type { Post } from '@/data/types'
 import { api } from '@/api/client'
 import { fromPost, fromSearchHit } from '@/api/adapt'
-import { usePaged } from '@/api/hooks'
+import { useApi, usePaged } from '@/api/hooks'
 import type { PostDto, SearchHitDto } from '@/api/types'
 import { useSession } from '@/context/session'
-import { usd } from '@/lib/format'
+import { searchTerm, usd } from '@/lib/format'
 import { NICHES } from '@/lib/rules'
 import { Button, Card, Input, PageHeader, Select, Switch, Tabs, toast } from '@/components/ui/primitives'
 import { ErrorState, LoadMore, RowSkeleton } from '@/components/ui/states'
 import { AccountLine, WhoTag } from '@/components/social/labels'
 import { AgentPostCard, PostCard } from '@/components/social/PostCard'
 
-type Tab = 'people' | 'companies' | 'agents' | 'posts'
+type Tab = 'all' | 'people' | 'companies' | 'agents' | 'posts'
+const ACCOUNT_TABS = ['people', 'companies', 'agents'] as const
 
 const TILES: [string, string][] = [
   ['Fashion', '1483985988355-763728e1935b'], ['Food & drinks', '1540189549336-e6e99c3679fe'], ['Music', '1516450360452-9312f5e86fc7'],
@@ -34,7 +35,7 @@ type Hit = { kind: 'account'; account: ReturnType<typeof fromSearchHit>; dto: Se
 export default function Search() {
   const { following, toggleFollow } = useSession()
   const [q, setQ] = useState('')
-  const [tab, setTab] = useState<Tab>('people')
+  const [tab, setTab] = useState<Tab>('all')
   const [niche, setNiche] = useState('')
   const [location, setLocation] = useState('')
   const [verified, setVerified] = useState(false)
@@ -43,9 +44,9 @@ export default function Search() {
   const [skill, setSkill] = useState('')
   const [maxPrice, setMaxPrice] = useState(200)
   const [showFilters, setShowFilters] = useState(false)
-  const query = useDebounced(q.trim())
+  const query = useDebounced(searchTerm(q))
 
-  const browsing = !query && tab === 'people' && !niche && !showFilters
+  const browsing = !query && (tab === 'all' || (tab === 'people' && !niche && !showFilters))
   const params = {
     q: query, tab,
     ...(tab === 'people' ? { niche: niche.toLowerCase() || undefined, location: location || undefined, verified_only: verified || undefined, available_for_hire: available || undefined } : {}),
@@ -53,24 +54,33 @@ export default function Search() {
     ...(tab === 'agents' ? { skill: skill.toLowerCase() || undefined, max_price_cents: maxPrice < 200 ? maxPrice * 100 : undefined } : {}),
   }
   const list = usePaged<SearchHitDto | PostDto, Hit>(
-    browsing ? null : (cursor, s) => api.page<SearchHitDto | PostDto>('/search', { ...params, cursor, limit: 24 }, s),
-    (r) => (tab === 'posts' ? { kind: 'post', post: fromPost(r as PostDto) } : { kind: 'account', account: fromSearchHit(r as SearchHitDto, tab), dto: r as SearchHitDto }),
+    browsing || tab === 'all' ? null : (cursor, s) => api.page<SearchHitDto | PostDto>('/search', { ...params, cursor, limit: 24 }, s),
+    (r) => (tab === 'posts' ? { kind: 'post', post: fromPost(r as PostDto) } : { kind: 'account', account: fromSearchHit(r as SearchHitDto, tab as (typeof ACCOUNT_TABS)[number]), dto: r as SearchHitDto }),
     [JSON.stringify(params), browsing],
   )
+  // "All": people, companies and agents at once, so a handle or name is found wherever it lives.
+  const everyone = useApi(tab === 'all' && query ? (s) => Promise.all(ACCOUNT_TABS.map((t) =>
+    api.page<SearchHitDto>('/search', { q: query, tab: t, limit: 12 }, s).then((p) => p.data.map((dto): Hit => ({ kind: 'account', account: fromSearchHit(dto, t), dto })))))
+    .then((r) => r.flat()) : null, [tab, query])
+  const allHits = useMemo(() => {
+    const exact = (h: Hit) => (h.kind === 'account' && h.account.handle.toLowerCase() === query.toLowerCase() ? 0 : 1)
+    return [...(everyone.data ?? [])].sort((a, b) => exact(a) - exact(b))
+  }, [everyone.data, query])
+  const shown = tab === 'all' ? { items: allHits, loading: everyone.loading, error: everyone.error, reload: everyone.reload } : list
 
   return (
     <div>
       <PageHeader title="Explore" subtitle="Find people, companies, agents and posts." />
       <div className="flex gap-2">
         <div className="flex-1"><Input icon={<SearchIcon />} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search Wamiwa" className="h-12 rounded-pill text-[15px]" autoFocus /></div>
-        {tab !== 'posts' && <Button variant="outline" size="lg" icon={<SlidersHorizontal className="size-4" />} onClick={() => setShowFilters(!showFilters)}>Filters</Button>}
+        {tab !== 'posts' && tab !== 'all' && <Button variant="outline" size="lg" icon={<SlidersHorizontal className="size-4" />} onClick={() => setShowFilters(!showFilters)}>Filters</Button>}
       </div>
 
       <Tabs className="mt-6" value={tab} onChange={setTab} tabs={[
-        { value: 'people', label: 'People' }, { value: 'companies', label: 'Companies' }, { value: 'agents', label: 'Agents' }, { value: 'posts', label: 'Posts' },
+        { value: 'all', label: 'All' }, { value: 'people', label: 'People' }, { value: 'companies', label: 'Companies' }, { value: 'agents', label: 'Agents' }, { value: 'posts', label: 'Posts' },
       ]} />
 
-      {showFilters && tab !== 'posts' && (
+      {showFilters && tab !== 'posts' && tab !== 'all' && (
         <Card flat className="mt-4 grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
           {tab === 'people' && (
             <>
@@ -107,16 +117,16 @@ export default function Search() {
 
       {!browsing && (
         <div className="mt-6">
-          {list.error ? <ErrorState error={list.error} onRetry={list.reload} />
-            : list.loading ? <Card><RowSkeleton /></Card>
-              : list.items.length === 0 ? <p className="py-10 text-center text-sm text-ink-2">No matches{query ? ` for “${query}”` : ''}. Try fewer filters.</p>
+          {shown.error ? <ErrorState error={shown.error} onRetry={shown.reload} />
+            : shown.loading ? <Card><RowSkeleton /></Card>
+              : shown.items.length === 0 ? <p className="py-10 text-center text-sm text-ink-2">No matches{query ? ` for “${query}”` : ''}.{tab === 'all' ? ' Check the spelling of the name or handle.' : ' Try fewer filters, or search All.'}</p>
                 : tab === 'posts' ? (
                   <div className="mx-auto max-w-[640px] space-y-4">
                     {list.items.map((h) => h.kind === 'post' && (h.post.label === 'agent' ? <AgentPostCard key={h.post.id} post={h.post} /> : <PostCard key={h.post.id} post={h.post} />))}
                   </div>
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {list.items.map((h) => {
+                    {shown.items.map((h) => {
                       if (h.kind !== 'account') return null
                       const a = h.account
                       const on = following.has(a.id)
@@ -124,7 +134,7 @@ export default function Search() {
                       return (
                         <Card key={a.id} className="flex flex-col p-5">
                           <div className="flex items-start justify-between gap-2">
-                            <AccountLine a={a} sub={a.niche ?? a.category ?? (a.location ? a.location : `@${a.handle}`)} />
+                            <AccountLine a={a} sub={[`@${a.handle}`, a.niche ?? a.category ?? a.location].filter(Boolean).join(' · ')} />
                             {a.kind === 'agent' && <WhoTag label="agent" />}
                           </div>
                           <div className="mt-4 flex items-center justify-between text-[12.5px] text-ink-2">
@@ -140,7 +150,7 @@ export default function Search() {
                     })}
                   </div>
                 )}
-          <LoadMore show={list.hasMore} loading={list.loadingMore} onClick={list.more} />
+          <LoadMore show={tab !== 'all' && list.hasMore} loading={list.loadingMore} onClick={list.more} />
         </div>
       )}
     </div>

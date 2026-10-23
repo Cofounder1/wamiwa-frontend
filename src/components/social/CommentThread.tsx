@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AtSign, Bot, Clock, Flag, Info, Send, Store, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react'
+import { AtSign, Bot, Check, Clock, Flag, Info, PenLine, Send, Store, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react'
 import { acc } from '@/data/mock'
 import type { Comment } from '@/data/types'
 import { api, errMsg } from '@/api/client'
@@ -8,7 +8,7 @@ import { fromComments, fromMarketAgent } from '@/api/adapt'
 import { useApi, usePaged } from '@/api/hooks'
 import type { CommentDto, MarketAgentDto } from '@/api/types'
 import { ago } from '@/lib/format'
-import { LIMITS } from '@/lib/rules'
+import { editMinutesLeft, LIMITS } from '@/lib/rules'
 import { cn } from '@/lib/cn'
 import { useSession } from '@/context/session'
 import { Avatar, Button, toast } from '@/components/ui/primitives'
@@ -17,7 +17,7 @@ import { ErrorState, LoadMore, RowSkeleton } from '@/components/ui/states'
 import { VerifiedMark, WhoTag } from './labels'
 import { RichText, SuggestedSellersLink } from './sponsored'
 import { ReportModal } from './ReportModal'
-import { VoteRail } from './PostCard'
+import { Edited, VoteRail } from './PostCard'
 import { Markdown } from '@/components/ui/Markdown'
 
 export function CommentThread({ postId, postAuthorId, variant = 'people', onCountChange }: {
@@ -32,6 +32,7 @@ export function CommentThread({ postId, postAuthorId, variant = 'people', onCoun
   )
   const [added, setAdded] = useState<CommentDto[]>([])
   const [removed, setRemoved] = useState<Set<string>>(new Set())
+  const [edited, setEdited] = useState<Map<string, Comment>>(new Map())
 
   // Merge server pages with comments posted in this session (replies are nested by parent).
   // A deleted comment with replies stays as "[deleted]" so its replies keep their place, as after a reload.
@@ -40,7 +41,7 @@ export function CommentThread({ postId, postAuthorId, variant = 'people', onCoun
   const hasReplies = (id: string) => all.some((c) => c.parentId === id && !removed.has(c.id))
   const items = all
     .filter((c) => !removed.has(c.id) || hasReplies(c.id))
-    .map((c) => (removed.has(c.id) ? { ...c, text: '[deleted]', mentions: undefined, suggest: undefined } : c))
+    .map((c) => (removed.has(c.id) ? { ...c, text: '[deleted]', mentions: undefined, suggest: undefined, editedAt: undefined } : edited.get(c.id) ?? c))
   const roots = items.filter((c) => !c.parentId)
   const childrenOf = (id: string) => items.filter((c) => c.parentId === id)
 
@@ -66,6 +67,14 @@ export function CommentThread({ postId, postAuthorId, variant = 'people', onCoun
       toast('Comment deleted')
     } catch (e) { toast('Couldn’t delete', errMsg(e), 'danger') }
   }
+  /** FD-08: the new text is moderated again; if it's flagged the comment is hidden (and uncounted) while reviewed. */
+  const edit = async (id: string, text: string) => {
+    const before = items.find((c) => c.id === id)
+    const dto = await api.patch<CommentDto>(`/comments/${id}`, { text })
+    const after = fromComments([{ ...dto, replies: [], agent_tags: [] }])[0]
+    setEdited((m) => new Map(m).set(id, { ...after, parentId: before?.parentId }))
+    if (after.hidden && !before?.hidden) { onCountChange?.(-1); toast('Saved — hidden for review', 'Our team checks it before others can see it again.') }
+  }
 
   return (
     <div>
@@ -73,7 +82,7 @@ export function CommentThread({ postId, postAuthorId, variant = 'people', onCoun
       <div className={cn('mt-5', variant === 'people' ? 'space-y-1' : 'space-y-3')}>
         {list.error ? <ErrorState compact error={list.error} onRetry={list.reload} />
           : list.loading && !items.length ? <RowSkeleton rows={3} />
-            : roots.map((c) => <CommentNode key={c.id} c={c} childrenOf={childrenOf} postAuthorId={postAuthorId} onReply={add} onDelete={remove} variant={variant} depth={0} />)}
+            : roots.map((c) => <CommentNode key={c.id} c={c} childrenOf={childrenOf} postAuthorId={postAuthorId} onReply={add} onDelete={remove} onEdit={edit} variant={variant} depth={0} />)}
         {!list.loading && !list.error && roots.length === 0 && <p className="py-8 text-center text-sm text-ink-2">No comments yet. Start the conversation.</p>}
         <LoadMore show={list.hasMore} loading={list.loadingMore} onClick={list.more} />
       </div>
@@ -93,18 +102,23 @@ function mergeTree(server: CommentDto[], added: CommentDto[]): CommentDto[] {
   return [...extra.filter((e) => !e.parent_id).reverse(), ...attach(server)]
 }
 
-function CommentNode({ c, childrenOf, postAuthorId, onReply, onDelete, variant, depth }: {
+function CommentNode({ c, childrenOf, postAuthorId, onReply, onDelete, onEdit, variant, depth }: {
   c: Comment; childrenOf: (id: string) => Comment[]; postAuthorId: string
-  onReply: (t: string, parent: string) => Promise<void>; onDelete: (id: string) => void; variant: 'people' | 'agents'; depth: number
+  onReply: (t: string, parent: string) => Promise<void>; onDelete: (id: string) => void; onEdit: (id: string, text: string) => Promise<void>
+  variant: 'people' | 'agents'; depth: number
 }) {
   const a = acc(c.authorId)
-  const { me } = useSession()
+  const { me, canManage } = useSession()
   const [replying, setReplying] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [report, setReport] = useState(false)
   const [rating, setRating] = useState<boolean | null>(null)
   const kids = childrenOf(c.id)
   const isTag = c.id.includes(':tag:')
-  const mine = c.authorId === me.id || (c.label === 'autoreply' && c.onBehalfOf === me.id)
+  // Delete: your own comments, replies made on your behalf, and anything your agents wrote (FD-08).
+  const mine = canManage(c.authorId) || (c.label === 'autoreply' && c.onBehalfOf === me.id)
+  // Edit: only comments you typed yourself, for 15 minutes, and not while under review.
+  const minutesLeft = c.authorId === me.id && c.label === 'human' && !c.hidden && c.text !== '[deleted]' ? editMinutesLeft(c.createdAt) : 0
 
   const rate = async (helpful: boolean) => {
     const prev = rating
@@ -124,13 +138,14 @@ function CommentNode({ c, childrenOf, postAuthorId, onReply, onDelete, variant, 
             <VerifiedMark a={a} className="size-3.5" />
             <WhoTag label={c.label} onBehalfOf={c.onBehalfOf} />
             {a.kind === 'agent' && a.ownerId && <span className="text-[11.5px] text-ink-3">by {acc(a.ownerId).name}</span>}
-            {!isTag && <span className="text-[12px] text-ink-3">· {ago(c.createdAt)}</span>}
+            {!isTag && <span className="text-[12px] text-ink-3">· {ago(c.createdAt)}<Edited at={c.editedAt} /></span>}
           </div>
 
-          {c.hidden ? <p className="mt-1 text-[13px] text-ink-3 italic">Hidden while our team reviews it.</p> : <TagBody c={c} postAuthorId={postAuthorId} />}
+          {editing ? <EditBox initial={c.text} onCancel={() => setEditing(false)} onSave={async (t) => { await onEdit(c.id, t); setEditing(false) }} />
+            : c.hidden ? <p className="mt-1 text-[13px] text-ink-3 italic">Hidden while our team reviews it.</p> : <TagBody c={c} postAuthorId={postAuthorId} />}
           {c.suggest && <SuggestedSellersLink category={c.suggest} url={c.suggestUrl} />}
 
-          {!isTag && (
+          {!isTag && !editing && (
             <div className="mt-1.5 flex items-center gap-1 text-[12px] font-semibold text-ink-3">
               {a.kind === 'agent' && c.authorId !== me.id && variant === 'people' && (
                 <span className="mr-1 inline-flex items-center gap-0.5">
@@ -140,6 +155,9 @@ function CommentNode({ c, childrenOf, postAuthorId, onReply, onDelete, variant, 
                 </span>
               )}
               <button onClick={() => setReplying(!replying)} className="inline-flex h-7 items-center rounded-full px-2 hover:bg-wash hover:text-ink">Reply</button>
+              {minutesLeft > 0 && (
+                <button onClick={() => setEditing(true)} title={`You can edit for ${minutesLeft} more minute${minutesLeft === 1 ? '' : 's'}`} className="inline-flex h-7 items-center gap-1 rounded-full px-2 opacity-0 transition group-hover:opacity-100 hover:bg-wash hover:text-ink focus:opacity-100"><PenLine className="size-3" />Edit</button>
+              )}
               {mine ? (
                 <button onClick={() => onDelete(c.id)} className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-danger opacity-0 transition group-hover:opacity-100 hover:bg-danger-soft focus:opacity-100"><Trash2 className="size-3" />Delete</button>
               ) : (
@@ -151,8 +169,36 @@ function CommentNode({ c, childrenOf, postAuthorId, onReply, onDelete, variant, 
         </div>
         {!isTag && !mine && <Menu className="opacity-0 transition group-hover:opacity-100" items={[{ label: 'Report comment', icon: <Flag />, onClick: () => setReport(true) }]} />}
       </div>
-      {kids.map((k) => <CommentNode key={k.id} c={k} childrenOf={childrenOf} postAuthorId={postAuthorId} onReply={onReply} onDelete={onDelete} variant={variant} depth={depth + 1} />)}
+      {kids.map((k) => <CommentNode key={k.id} c={k} childrenOf={childrenOf} postAuthorId={postAuthorId} onReply={onReply} onDelete={onDelete} onEdit={onEdit} variant={variant} depth={depth + 1} />)}
       <ReportModal open={report} onClose={() => setReport(false)} target="comment" targetType="comment" targetId={c.id} />
+    </div>
+  )
+}
+
+/** Inline comment editor: Enter saves, Escape cancels; the API's message shows if it refuses. */
+function EditBox({ initial, onSave, onCancel }: { initial: string; onSave: (t: string) => Promise<void>; onCancel: () => void }) {
+  const [text, setText] = useState(initial)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+  const save = async () => {
+    const t = text.trim()
+    if (!t || busy) return
+    if (t === initial.trim()) { onCancel(); return }
+    setBusy(true)
+    setError(undefined)
+    try { await onSave(t) } catch (e) { setError(errMsg(e)); setBusy(false) }
+  }
+  return (
+    <div className="mt-1.5">
+      <div className={cn('flex items-center gap-1 rounded-pill border bg-surface pr-1 pl-3 focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/15', error ? 'border-danger' : 'border-line')}>
+        <input autoFocus value={text} maxLength={2000} aria-label="Edit comment"
+          onChange={(e) => { setText(e.target.value); setError(undefined) }}
+          onKeyDown={(e) => { if (e.key === 'Enter') void save(); if (e.key === 'Escape') onCancel() }}
+          className="h-9 min-w-0 flex-1 bg-transparent text-[14px] focus:outline-none" />
+        <button onClick={onCancel} aria-label="Cancel edit" className="grid size-7 place-items-center rounded-full text-ink-3 hover:bg-wash"><X className="size-3.5" /></button>
+        <button onClick={save} disabled={!text.trim() || busy} aria-label="Save edit" className="grid size-7 place-items-center rounded-full bg-brand text-on-brand disabled:opacity-40"><Check className="size-3.5" /></button>
+      </div>
+      {error && <p className="mt-1.5 pl-3 text-xs text-danger">{error}</p>}
     </div>
   )
 }

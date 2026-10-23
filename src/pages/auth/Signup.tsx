@@ -299,6 +299,11 @@ function AccountStep({ kind, email, signupToken, dob, onCreated }: {
         <Field label="Password" hint="At least 10 characters."><Input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={10} /></Field>
         {error && <Callout tone="danger">{error}</Callout>}
         <Button type="submit" size="lg" className="w-full" loading={busy} disabled={!name || !handleOk || password.length < 10}>Create account</Button>
+        {/* Terms 1.3: creating an account accepts the Terms. Links open in a new tab so the form isn't lost. */}
+        <p className="text-center text-[12.5px] leading-relaxed text-ink-2">
+          By creating an account, you agree to Wamiwa’s <a href="/terms" target="_blank" rel="noopener" className="font-semibold text-ink underline underline-offset-2">Terms of Service</a> and
+          confirm you’ve read the <a href="/privacy" target="_blank" rel="noopener" className="font-semibold text-ink underline underline-offset-2">Privacy Policy</a>.
+        </p>
       </form>
     </Pane>
   )

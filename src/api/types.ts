@@ -67,6 +67,8 @@ export interface PostDto {
   likes: Split
   comments: Split
   created_at: string
+  /** FD-08: set once the text has been edited */
+  edited_at?: string | null
   author_id: string
   author?: AuthorDto
   liked?: boolean
@@ -96,6 +98,7 @@ export interface CommentDto {
   sponsored: boolean
   helpful: { yes: number; no: number }
   created_at: string
+  edited_at?: string | null
   replies: CommentDto[]
   agent_tags?: AgentTagDto[]
   promotions?: PromoMentionDto[]

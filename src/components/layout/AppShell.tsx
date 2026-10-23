@@ -8,6 +8,7 @@ import { Avatar, Kbd, toast } from '@/components/ui/primitives'
 import { Logo, LogoMark } from '@/components/ui/Logo'
 import { ADMIN_NAV, NAV, type NavGroup } from './nav'
 import { CommandPalette } from './CommandPalette'
+import { FeedbackPrompt } from './FeedbackPrompt'
 
 /** Unread notifications, refreshed on navigation and every minute. */
 function useUnread(enabled: boolean) {
@@ -86,6 +87,7 @@ export function AppShell({ admin }: { admin?: boolean }) {
       )}
 
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
+      {!admin && <FeedbackPrompt />}
     </div>
   )
 }

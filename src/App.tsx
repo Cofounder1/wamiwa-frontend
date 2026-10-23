@@ -13,6 +13,8 @@ function lz<M extends Record<string, unknown>>(load: () => Promise<M>, name: key
 const Signup = lz(() => import('@/pages/auth/Signup'))
 const Login = lz(() => import('@/pages/auth/Login'))
 const Developers = lz(() => import('@/pages/marketing/Developers'))
+const Terms = lz(() => import('@/pages/legal/Legal'), 'Terms')
+const Privacy = lz(() => import('@/pages/legal/Legal'), 'Privacy')
 const ProGrowth = lz(() => import('@/pages/earn/ProGrowth'))
 
 const Feed = lz(() => import('@/pages/social/Feed'))
@@ -93,6 +95,7 @@ const AdminManagement = lz(AO, 'AdminManagement')
 const AuditLog = lz(AO, 'AuditLog')
 const CategoryMap = lz(AO, 'CategoryMap')
 const Keywords = lz(AO, 'Keywords')
+const Feedback = lz(AO, 'Feedback')
 
 function Loading() {
   return <div className="grid min-h-[50vh] place-items-center text-ink-3"><Loader2 className="size-6 animate-spin" /></div>
@@ -107,6 +110,8 @@ export default function App() {
           <Route path="/signup" element={<Signup />} />
           <Route path="/login" element={<Login />} />
           <Route path="/developers" element={<Developers />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/privacy" element={<Privacy />} />
 
           <Route path="/app" element={<AppShell />}>
             <Route index element={<Navigate to="feed" replace />} />
@@ -181,6 +186,7 @@ export default function App() {
             <Route path="health" element={<QueueHealth />} />
             <Route path="admins" element={<AdminManagement />} />
             <Route path="audit" element={<AuditLog />} />
+            <Route path="feedback" element={<Feedback />} />
             <Route path="category-map" element={<CategoryMap />} />
             <Route path="keywords" element={<Keywords />} />
             <Route path="wamiwa-agent" element={<WamiwaAgentAdmin />} />

@@ -75,6 +75,7 @@ export const WA_PLANS: Record<PlanKind, { name: string; base: number; plus: numb
 export const LIMITS = {
   otpResendsPerHour: 3, otpWrongBeforeLock: 5, otpLockMinutes: 15, otpValidMinutes: 10,
   agentsPerComment: 3, agentToAgentPerThread: 3, agentCommentsPerHour: 30,
+  editWindowMinutes: 15,
   b2bNewPerDay: 20, apiPostsPerHour: 60, apiRepliesPerHour: 600,
   wamiwaRepliesPerHour: 600, wamiwaRepliesPerPersonDay: 5, cardsPerPost: 3,
 }
@@ -100,3 +101,9 @@ export const NICHES = [
   'Fashion', 'Beauty', 'Food & drinks', 'Music', 'Comedy', 'Tech', 'Fitness', 'Travel', 'Finance',
   'Gaming', 'Art & design', 'Parenting', 'Sports', 'Education', 'Lifestyle', 'Autos', 'Agriculture',
 ]
+
+/** FD-08: whole minutes left to edit something posted at `createdAt` (0 once the window has closed). */
+export function editMinutesLeft(createdAt: string, now = Date.now()) {
+  const left = LIMITS.editWindowMinutes * 60_000 - (now - new Date(createdAt).getTime())
+  return left > 0 ? Math.max(1, Math.ceil(left / 60_000)) : 0
+}

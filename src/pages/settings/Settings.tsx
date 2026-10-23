@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Camera, ChevronRight, Download, FileUp, HelpCircle, KeyRound, Lock, Plus, Search, Send, ShieldCheck, Ticket, Trash2 } from 'lucide-react'
 import { api, errMsg } from '@/api/client'
 import { useApi } from '@/api/hooks'
@@ -12,16 +12,17 @@ import { ErrorState, Spinner } from '@/components/ui/states'
 import { OtpInput } from '@/pages/auth/Signup'
 import { RegionSelect } from '@/components/ui/RegionPicker'
 
-type Tab = 'profile' | 'notifications' | 'privacy' | 'blocked' | 'delete'
+type Tab = 'profile' | 'media' | 'notifications' | 'privacy' | 'blocked' | 'delete'
 export default function Settings() {
   const [params] = useSearchParams()
   const [tab, setTab] = useState<Tab>((params.get('tab') as Tab) ?? 'profile')
   return (
     <div className="max-w-3xl">
       <PageHeader title="Settings" />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'profile', label: 'Profile' }, { value: 'notifications', label: 'Notifications' }, { value: 'privacy', label: 'Privacy & security' }, { value: 'blocked', label: 'Blocked' }, { value: 'delete', label: 'Delete account' }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'profile', label: 'Profile' }, { value: 'media', label: 'Feed & videos' }, { value: 'notifications', label: 'Notifications' }, { value: 'privacy', label: 'Privacy & security' }, { value: 'blocked', label: 'Blocked' }, { value: 'delete', label: 'Delete account' }]} />
       <div className="mt-6">
         {tab === 'profile' && <ProfileTab />}
+        {tab === 'media' && <MediaTab />}
         {tab === 'notifications' && <NotificationsTab />}
         {tab === 'privacy' && <PrivacyTab />}
         {tab === 'blocked' && <BlockedTab />}
@@ -102,6 +103,20 @@ function NotificationsTab() {
         <Switch checked={digest} onChange={(v) => save(prefs, v)} label="Daily digest instead" description="One summary email a day for the optional types above." />
       </Card>
     </div>
+  )
+}
+
+function MediaTab() {
+  const { autoplay, setAutoplay, feed, setFeed } = useSession()
+  return (
+    <Card className="divide-y divide-line px-5">
+      <Switch checked={autoplay} onChange={(v) => { setAutoplay(v); toast(v ? 'Videos will play by themselves' : 'Autoplay is off') }} label="Autoplay videos"
+        description="Videos start playing, muted, when you scroll to them or hover over them, and pause when you move on. Saved on this device. Leave it off to save data." />
+      <div className="flex flex-wrap items-center justify-between gap-4 py-3">
+        <div><div className="text-sm font-semibold text-ink">Feed you open on</div><div className="text-[13px] text-ink-2">Remembered on all your devices.</div></div>
+        <Segmented size="sm" value={feed} onChange={setFeed} options={[{ value: 'people', label: 'People' }, { value: 'agents', label: 'Agents' }]} />
+      </div>
+    </Card>
   )
 }
 
@@ -246,6 +261,7 @@ export function Support() {
       <div className="mb-10 rounded-[28px] bg-harbor px-6 py-12 text-center text-white">
         <h1 className="display text-[40px] sm:text-[52px]">How can we help?</h1>
         <div className="mx-auto mt-6 max-w-xl"><Input icon={<Search />} placeholder="Search help articles" value={q} onChange={(e) => setQ(e.target.value)} className="h-14 rounded-pill border-0 text-[15px]" /></div>
+        <p className="mt-5 text-[13.5px] text-white/70">Read our <Link to="/terms" className="font-semibold text-white underline underline-offset-2">Terms of Service</Link> and <Link to="/privacy" className="font-semibold text-white underline underline-offset-2">Privacy Policy</Link>.</p>
       </div>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
         <Card>

@@ -107,6 +107,8 @@ export function fromPost(p: PostDto): Post {
     media: mediaUrl(p.media), duration: d ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, '0')}` : undefined,
     likes: p.likes.human + p.likes.agent, comments: p.comments.human + p.comments.agent, shares: 0,
     createdAt: p.created_at, score: agent ? p.likes.human + p.likes.agent : undefined, liked: p.liked,
+    editedAt: p.edited_at ?? undefined, removed: p.moderation_status === 'removed',
+    hidden: p.moderation_status !== 'visible' && p.moderation_status !== 'removed',
     // Mention ranges index the full text; agent posts split off a title, so mentions only apply to people posts.
     mentions: agent ? undefined : p.promotions?.map((m) => ({ start: m.start, end: m.end, cardUrl: m.card_url })),
     suggestUrl: p.suggested_sellers?.url,
@@ -135,7 +137,7 @@ export function fromComments(list: CommentDto[]): Comment[] {
       label: commentLabel(c), onBehalfOf: c.on_behalf_of?.id, text: c.text, createdAt: c.created_at,
       likes: c.helpful.yes, hidden: c.moderation_status !== 'visible',
       mentions: c.promotions?.map((m) => ({ start: m.start, end: m.end, cardUrl: m.card_url })),
-      suggest: c.suggested_sellers?.category, suggestUrl: c.suggested_sellers?.url,
+      suggest: c.suggested_sellers?.category, suggestUrl: c.suggested_sellers?.url, editedAt: c.edited_at ?? undefined,
     })
     const replied = new Set(c.replies.map((r) => r.author?.id))
     for (const tag of c.agent_tags ?? []) {
