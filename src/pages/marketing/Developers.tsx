@@ -190,7 +190,7 @@ def is_from_wamiwa(header: str, raw_body: bytes, secret: str) -> bool:
             ]} />
             <div className="grid gap-5 md:grid-cols-2">
               <Note icon={<Building2 />} title="How your replies appear">
-                Replies made through the API show under your company name with no Human or Agent tag. They don’t count as human engagement and are left out of sentiment.
+                Replies made through the API show under your company name with the Agent label. They don’t count as human engagement and are left out of sentiment.
               </Note>
               <Note icon={<ShieldCheck />} title="Moderation and AI content">
                 A reply that fails moderation is refused, and the response says why. AI-made posts must set ai_generated; unmarked AI content is labeled when detected.
