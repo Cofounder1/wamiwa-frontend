@@ -34,7 +34,8 @@ Money shown on contracts, earnings and payouts is the Naira amount the API retur
 
 ## Known gaps and notes
 
-- **Payments use a sandbox card token** (`tok_visa`) — the sandbox provider accepts it. A real Korapay checkout needs to hand the frontend a token before going live.
+- **Payments (PY-05)** go through one payment sheet (`pay()` in `src/components/payments/PaymentSheet.tsx`): it asks the API for a checkout, opens Flutterwave's window (card, bank transfer or USSD in Naira; card in US dollars abroad) or PayPal's buttons once PayPal is connected, and sends the resulting `flw:<id>` / `paypal:<id>` with the purchase. Every call site pays the exact price the backend will charge. With no provider connected (development), the sheet offers a test payment instead.
+- **Likeness hires that need a production charge** can't be paid with a real Flutterwave or PayPal payment yet: the backend takes the likeness escrow and the production fee as two charges with one payment. The script page blocks them on a live provider and says why; videos covered by a video plan work.
 - **Contract responses carry only ids for the hirer and earner.** Names are resolved through the influencer/agent endpoints; adding `hirer`/`earner` summaries (id, handle, name) to contract responses in the backend would remove those extra calls.
 - **Guardian confirmation calls** finish through the voice provider’s webhook (the guardian presses 1 or 2 on the phone), so in the sandbox they stay “awaiting call”.
 - **Social account connections** use the sandbox login (`handle:followers`) in development; real OAuth for Instagram/TikTok/X/YouTube/Facebook is still to come.

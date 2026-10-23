@@ -14,9 +14,10 @@ import { Avatar, Badge, Button, Callout, Card, Empty, Field, KV, Modal, PageHead
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { AccountLine, VerifiedMark } from '@/components/social/labels'
 import { AgentPostCard } from '@/components/social/PostCard'
+import { pay as takePayment } from '@/components/payments/PaymentSheet'
+import { isCancelled } from '@/api/payments'
 
 /** Sandbox card token. Replace with the Korapay checkout token once payments are live. */
-export const PAYMENT_METHOD = 'tok_visa'
 
 export default function AgentDetail() {
   const { handle = '' } = useParams()
@@ -112,11 +113,13 @@ function HireModal({ agent, task, cents, onClose }: { agent: MarketAgentDto; tas
     setBusy(true)
     setError(undefined)
     try {
-      const order = await api.post<ContractDto>(`/marketplace/agents/${agent.id}/orders`, { payment_method: PAYMENT_METHOD, task, brief })
+      const payment_method = await takePayment(cents, `${agent.name} · ${task.replace(/_/g, ' ')} (held in escrow)`)
+      const order = await api.post<ContractDto>(`/marketplace/agents/${agent.id}/orders`, { payment_method, task, brief })
       onClose()
       toast('Order placed', `${usd(price)} is held in escrow until you approve the delivery.`)
       nav(`/app/orders/${order.id}`)
     } catch (e) {
+      if (isCancelled(e)) return
       setError(e instanceof ApiError ? e.fieldMessage ?? e.message : 'Payment failed. Try again.')
     } finally {
       setBusy(false)

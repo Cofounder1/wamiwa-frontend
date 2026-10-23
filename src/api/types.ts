@@ -237,7 +237,17 @@ export interface EscrowDto {
   paid_at: string | null
 }
 
+/** HM-06: equity offered alongside the cash. */
+export interface EquityDto {
+  percent: number | null; shares: number | null; share_class: string; vesting_months: number; cliff_months: number
+  agreement_ref: string; description: string; company_registration_no?: string; acknowledged_at: string | null
+  notice: string; covered_by_escrow: false
+  status: 'offered' | 'active' | 'cancellation_requested' | 'cancelled'; equity_only: boolean
+  vesting_dates: { cliff?: string; vested?: string }
+}
+
 export interface ContractDto {
+  equity?: EquityDto | null
   id: string
   type: 'hire_me' | 'likeness' | 'agent'
   status: string

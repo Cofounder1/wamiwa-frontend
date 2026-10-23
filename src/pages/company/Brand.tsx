@@ -4,7 +4,7 @@ import {
   AlertTriangle, Bot, Briefcase, Clapperboard, Film, Lock, Mic, Plus, Send, ShieldAlert, Sparkles, Star, Type, Upload, Wand2,
 } from 'lucide-react'
 import { acc, upsertAccount } from '@/data/mock'
-import { api, mediaUrl, errMsg } from '@/api/client'
+import { api, ApiError, mediaUrl, errMsg } from '@/api/client'
 import { fromMarketAgent, partyName, statusText } from '@/api/adapt'
 import { useApi, usePaged, useParties } from '@/api/hooks'
 import type { AnalyticsDto, ContractDto, MarketAgentDto, ProfileDto } from '@/api/types'
@@ -16,6 +16,8 @@ import { Avatar, Badge, Button, Callout, Card, CardHeader, Checkbox, Empty, Fiel
 import { ErrorState, LoadMore, Spinner } from '@/components/ui/states'
 import { SendOfferModal } from './SendOffer'
 import type { VideoDto } from '@/pages/earn/VideoApproval'
+import { pay } from '@/components/payments/PaymentSheet'
+import { isCancelled, paymentMethod } from '@/api/payments'
 
 const cap = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
 
@@ -107,6 +109,7 @@ export function ScriptComposer() {
   }, [handle])
   const prices = useApi((s) => api.get<VideoPrices>('/video-plans/prices', undefined, s), [])
   const plan = useApi((s) => api.get<{ active: boolean; videos_left: number }>('/video-plans', undefined, s), [])
+  const provider = useApi(() => paymentMethod(), [])
   const [voice, setVoice] = useState(false)
   const [excl, setExcl] = useState(false)
   const [mustPost, setMustPost] = useState(false)
@@ -119,22 +122,28 @@ export function ScriptComposer() {
   if (!res.data || !prices.data) return <Spinner />
   const a = res.data
   const pr = prices.data
-  const price = excl && a.exclusivity_price_cents ? a.exclusivity_price_cents : voice && a.price_image_voice_cents ? a.price_image_voice_cents : a.price_image_cents
+  // As the backend prices it: image (or image + voice), and exclusivity adds its premium over image-only.
+  const price = (voice && a.price_image_voice_cents ? a.price_image_voice_cents : a.price_image_cents)
+    + (excl && a.exclusivity_price_cents ? a.exclusivity_price_cents - a.price_image_cents : 0)
   const extraMinutes = Math.max(0, Math.ceil((seconds - pr.included_seconds) / 60))
   const onPlan = !!plan.data?.active && usePlan
   const production = onPlan ? 0 : pr.pay_per_video_cents + extraMinutes * pr.extra_minute_cents
   const total = price + production
+  // The backend takes the likeness escrow and the production fee as two charges with one payment, which a real
+  // Flutterwave or PayPal payment can't cover. Until that's fixed there, only plan-covered videos can be paid live.
+  const productionBlocked = production > 0 && !!provider.data && provider.data.provider !== 'stand_in'
 
   const send = async () => {
     setBusy(true); setError(undefined)
     try {
+      const payment_method = await pay(price, `Likeness hire · ${a.name} (held in escrow)`)
       const c = await api.post<ContractDto>('/likeness/contracts', {
         influencer_id: a.account_id, script, with_voice: voice, exclusivity: excl, influencer_must_post: mustPost, video_seconds: seconds,
-        use_plan: onPlan, no_ai_replies: false, payment_method: 'tok_visa',
+        use_plan: onPlan, no_ai_replies: false, payment_method,
       })
       toast('Script paid & sent', c.status === 'admin_review' ? 'It was flagged by screening, so an admin reviews it first (about 24h).' : `${a.name.split(' ')[0]} has 7 days to respond.`)
       nav(`/app/contracts/${c.id}`)
-    } catch (e) { setError(errMsg(e)) } finally { setBusy(false) }
+    } catch (e) { if (!isCancelled(e)) setError(errMsg(e)) } finally { setBusy(false) }
   }
   return (
     <div>
@@ -161,7 +170,8 @@ export function ScriptComposer() {
               {plan.data?.active && <Checkbox checked={usePlan} onChange={setUsePlan}>Use my video plan ({plan.data.videos_left} left)</Checkbox>}
             </div>
             <KV className="mt-4" rows={[['Likeness (to escrow)', usd(price / 100)], ['Video production', production ? usd(production / 100) : 'From plan'], ['Includes', `${pr.included.draft_previews} drafts + ${pr.included.final_renders} finals`], ['Total today', <span key="t" className="text-[16px]">{usd(total / 100)}</span>]]} />
-            <Button className="mt-4 w-full" loading={busy} disabled={script.trim().length < 20} icon={<Lock className="size-4" />} onClick={send}>Pay & send script</Button>
+            {productionBlocked && <Callout className="mt-4 !p-3" tone="warn">Video production can’t be paid online yet. Use a video plan (up to {pr.included_seconds}s per video) to send this script.</Callout>}
+            <Button className="mt-4 w-full" loading={busy} disabled={script.trim().length < 20 || productionBlocked} icon={<Lock className="size-4" />} onClick={send}>Pay & send script</Button>
             <p className="mt-2 text-center text-[11.5px] text-ink-3">The creator receives 80% of the likeness price.</p>
           </Card>
           <Callout tone="neutral">The creator can accept, reject, or request up to 3 rounds of changes. If they don’t answer in 7 days, you’re refunded in full.</Callout>
@@ -190,10 +200,15 @@ export function VideoStudio() {
   const gen = async (kind: 'draft' | 'final', paid = false) => {
     setBusy(kind)
     try {
-      await api.post(`/likeness/contracts/${id}/videos`, { kind, payment_method: paid ? 'tok_visa' : null })
+      const body = { kind, payment_method: null as string | null }
+      try { await api.post(`/likeness/contracts/${id}/videos`, body) } catch (e) {
+        const cents = e instanceof ApiError && e.status === 402 ? Number(e.details.price_cents) : 0
+        if (!paid || !cents) throw e
+        await api.post(`/likeness/contracts/${id}/videos`, { ...body, payment_method: await pay(cents, 'Extra final render') })
+      }
       toast(kind === 'draft' ? 'Draft preview ready' : 'Final render sent for approval', kind === 'final' ? 'The creator has 72 hours to approve; then it auto-approves.' : undefined)
       res.reload()
-    } catch (e) { toast('Couldn’t render', errMsg(e), 'danger') } finally { setBusy(null) }
+    } catch (e) { if (!isCancelled(e)) toast('Couldn’t render', errMsg(e), 'danger') } finally { setBusy(null) }
   }
   const post = async () => {
     setBusy('post')

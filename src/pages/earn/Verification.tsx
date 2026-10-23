@@ -11,6 +11,7 @@ import { cn } from '@/lib/cn'
 import { Badge, Button, Callout, Card, CardHeader, Field, Input, Modal, PageHeader, Progress, Select, Tabs, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { LiveCheck, type LiveCapture } from '@/components/ui/LiveCheck'
+import { RegionSelect } from '@/components/ui/RegionPicker'
 
 type Tab = 'id' | 'bank' | 'social' | 'public'
 async function upload(kind: string, f: File) {
@@ -93,7 +94,7 @@ function IdentityTab() {
   )
 }
 
-interface Bank { bank_code: string; account_number: string; account_name: string; name_matches_id?: boolean; hold_until?: string | null }
+interface Bank { bank_code: string; account_number: string; account_name: string; bank_name?: string | null; currency?: 'NGN' | 'USD'; name_matches_id?: boolean; hold_until?: string | null }
 const BANKS = [['044', 'Access Bank'], ['058', 'GTBank'], ['057', 'Zenith Bank'], ['033', 'UBA'], ['011', 'First Bank'], ['50211', 'Kuda'], ['999992', 'OPay']]
 
 function BankTab() {
@@ -104,12 +105,19 @@ function BankTab() {
   const [name, setName] = useState('')
   const [totp, setTotp] = useState('')
   const [busy, setBusy] = useState(false)
+  // PY-05: outside Nigeria, payouts go to your own bank in US dollars, with the details a foreign transfer needs.
+  const abroad = !!meDto?.region && meDto.region !== 'nigeria'
+  const [intl, setIntl] = useState({ bank_name: '', swift_code: '', routing_number: '', beneficiary_address: '', beneficiary_country: meDto?.region ?? '' })
+  const setI = (k: keyof typeof intl) => (e: { target: { value: string } }) => setIntl((x) => ({ ...x, [k]: e.target.value }))
   useEffect(() => { if (res.data) { setCode(res.data.bank_code); setName(res.data.account_name) } }, [res.data])
   if (res.error && res.error.status !== 404) return <ErrorState error={res.error} onRetry={res.reload} />
   const save = async () => {
     setBusy(true)
     try {
-      await api.put('/verification/bank-account', { bank_code: code, account_number: num, account_name: name, totp_code: totp || null })
+      await api.put('/verification/bank-account', abroad
+        ? { bank_code: 'intl', account_number: num, account_name: name, totp_code: totp || null,
+          details: Object.fromEntries(Object.entries(intl).filter(([, v]) => v.trim())) }
+        : { bank_code: code, account_number: num, account_name: name, totp_code: totp || null })
       toast('Bank account saved', 'Payouts are held for 48 hours after a change, and we’ve sent email + SMS alerts.')
       setNum(''); setTotp(''); res.reload()
     } catch (e) { toast('Couldn’t save', errMsg(e), 'danger') } finally { setBusy(false) }
@@ -121,20 +129,38 @@ function BankTab() {
       {role === 'minor' && <Callout className="mt-4" tone="brand">Payouts for under-18s go to your guardian’s account, in their name.</Callout>}
       {cur && (
         <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-surface-2 p-4 text-[14px]">
-          <span className="font-bold text-ink">{BANKS.find(([c]) => c === cur.bank_code)?.[1] ?? cur.bank_code} · {cur.account_number}</span>
+          <span className="font-bold text-ink">{cur.bank_name ?? BANKS.find(([c]) => c === cur.bank_code)?.[1] ?? cur.bank_code} · {cur.account_number}{cur.currency === 'USD' ? ' · paid in US dollars' : ''}</span>
           <span className="text-ink-2">{cur.account_name}</span>
           {cur.name_matches_id === false ? <Badge tone="danger">Name doesn’t match your ID — payouts blocked</Badge> : <Badge tone="success" icon={<Check className="size-3" />}>Matches your ID</Badge>}
           {cur.hold_until && <Badge tone="warn">Payouts held until {date(cur.hold_until)}</Badge>}
         </div>
       )}
+      {abroad && <Callout className="mt-4" tone="neutral">You’re outside Nigeria, so you’re paid in US dollars to your own bank. The account name can’t be looked up abroad, so it’s matched to your ID as you type it.</Callout>}
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <Field label="Bank"><Select value={code} onChange={(e) => setCode(e.target.value)}>{BANKS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</Select></Field>
-        <Field label="Account number"><Input inputMode="numeric" maxLength={10} value={num} onChange={(e) => setNum(e.target.value.replace(/\D/g, ''))} placeholder={cur ? 'New account number' : '0123456789'} /></Field>
+        {abroad ? (
+          <>
+            <Field label="Bank name"><Input value={intl.bank_name} onChange={setI('bank_name')} placeholder="e.g. Barclays" /></Field>
+            <Field label="Account number or IBAN"><Input maxLength={34} value={num} onChange={(e) => setNum(e.target.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase())} placeholder={cur ? 'New account number' : 'GB29NWBK60161331926819'} /></Field>
+            <Field label="SWIFT / BIC" hint="Or give a routing number."><Input maxLength={11} value={intl.swift_code} onChange={(e) => setIntl((x) => ({ ...x, swift_code: e.target.value.toUpperCase() }))} /></Field>
+            <Field label="Routing number" optional hint="US banks: the 9-digit ABA number."><Input inputMode="numeric" maxLength={9} value={intl.routing_number} onChange={(e) => setIntl((x) => ({ ...x, routing_number: e.target.value.replace(/\D/g, '') }))} /></Field>
+            <Field label="Your address" className="sm:col-span-2" hint="The address your bank has for you."><Input value={intl.beneficiary_address} onChange={setI('beneficiary_address')} /></Field>
+            <Field label="Country of the account"><RegionSelect value={intl.beneficiary_country} onChange={(beneficiary_country) => setIntl((x) => ({ ...x, beneficiary_country }))} /></Field>
+          </>
+        ) : (
+          <>
+            <Field label="Bank"><Select value={code} onChange={(e) => setCode(e.target.value)}>{BANKS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</Select></Field>
+            <Field label="Account number"><Input inputMode="numeric" maxLength={10} value={num} onChange={(e) => setNum(e.target.value.replace(/\D/g, ''))} placeholder={cur ? 'New account number' : '0123456789'} /></Field>
+          </>
+        )}
         <Field label="Account name" className="sm:col-span-2" hint="Must match your verified ID name."><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
         {meDto?.two_factor_enabled && <Field label="Authenticator code" hint="Required to change payout details."><Input inputMode="numeric" maxLength={6} value={totp} onChange={(e) => setTotp(e.target.value)} /></Field>}
       </div>
-      <Callout className="mt-5" tone="neutral">Changing bank details holds payouts for 48 hours and sends email + SMS alerts.</Callout>
-      <Button className="mt-5" loading={busy} disabled={num.length !== 10 || !name} onClick={save}>{cur ? 'Change account' : 'Save account'}</Button>
+      {cur && !meDto?.two_factor_enabled
+        ? <Callout className="mt-5" tone="warn" title="Turn on two-factor login first" action={<Button size="sm" to="/app/settings?tab=privacy">Set up</Button>}>Changing payout details needs a code from an authenticator app, so nobody else can redirect your money.</Callout>
+        : <Callout className="mt-5" tone="neutral">Changing bank details holds payouts for 48 hours and sends email + SMS alerts.</Callout>}
+      <Button className="mt-5" loading={busy} disabled={!name || (abroad
+        ? num.length < 5 || !intl.bank_name.trim() || !intl.beneficiary_address.trim() || !intl.beneficiary_country || !(intl.swift_code.trim() || intl.routing_number.trim())
+        : num.length !== 10)} onClick={save}>{cur ? 'Change account' : 'Save account'}</Button>
     </Card>
   )
 }

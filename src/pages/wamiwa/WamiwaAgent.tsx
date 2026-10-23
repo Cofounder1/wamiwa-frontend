@@ -11,8 +11,12 @@ import { cn } from '@/lib/cn'
 import { Badge, Button, Callout, Card, CardHeader, Checkbox, Field, Input, Modal, PageHeader, Segmented, Select, Tabs, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { RegionPicker, regionName, useRegions } from '@/components/ui/RegionPicker'
+import { pay } from '@/components/payments/PaymentSheet'
+import { isCancelled } from '@/api/payments'
 
 type Kind = 'business' | 'seller' | 'artist' | 'label'
+/** The Plus add-on charged when moving up mid-month (backend setting promo_plus_addon_cents). */
+const PLUS_ADDON_CENTS = 10_00
 interface PlanPrice { usd_cents: number; local: number; links: number }
 interface PlansDto { currency: string; prices: Record<Kind, { base: PlanPrice; plus: PlanPrice }>; label_roster_size: number; packages: Record<'base' | 'plus', string> }
 interface NameDto { id: string; name: string; status: string; matches_in_plain_text: boolean; default_link: { label: string; url: string } | null }
@@ -54,10 +58,11 @@ function BuyPlan({ onBought }: { onBought: () => void }) {
   const buy = async () => {
     setBusy(true); setError(undefined)
     try {
-      await api.post('/promotions', { kind, tier, category: needsCategory ? category : null, brand_name: needsName ? name : null, links: [], target_regions: [], payment_method: 'tok_visa' })
+      const payment_method = await pay(p.usd_cents, `Wamiwa Agent · ${kind} ${tier === 'plus' ? 'Plus' : ''} · first month`.replace(/\s+/g, ' '))
+      await api.post('/promotions', { kind, tier, category: needsCategory ? category : null, brand_name: needsName ? name : null, links: [], target_regions: [], payment_method })
       toast('Wamiwa Agent bought', kind === 'seller' ? 'Your shop name and links are reviewed within 2 working days.' : 'Add the links you want shared.')
       onBought()
-    } catch (e) { setError(e instanceof ApiError ? e : undefined); toast('Couldn’t buy the plan', errMsg(e), 'danger') } finally { setBusy(false) }
+    } catch (e) { if (isCancelled(e)) return; setError(e instanceof ApiError ? e : undefined); toast('Couldn’t buy the plan', errMsg(e), 'danger') } finally { setBusy(false) }
   }
 
   return (
@@ -130,7 +135,7 @@ function ManagePlan({ plan, reload }: { plan: PlanDto; reload: () => void }) {
 
   const act = async (fn: () => Promise<unknown>, done: string, sub?: string) => {
     setBusy(true)
-    try { await fn(); toast(done, sub); reload() } catch (e) { toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(false) }
+    try { await fn(); toast(done, sub); reload() } catch (e) { if (!isCancelled(e)) toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(false) }
   }
 
   return (
@@ -170,7 +175,7 @@ function ManagePlan({ plan, reload }: { plan: PlanDto; reload: () => void }) {
           <div className="grid gap-4 md:grid-cols-3">
             <Card className="p-5">
               <div className="text-[13px] font-bold text-ink">Package</div>
-              <Segmented className="mt-3" value={plan.tier} onChange={(t) => act(() => api.patch('/promotions', { tier: t, payment_method: 'tok_visa' }), t === 'plus' ? 'Moved to Plus' : 'Moved to base', t === 'plus' ? 'The extra $10 is charged now and with each renewal.' : 'All links stay saved; only the first ones within the limit are shared.')} options={[{ value: 'base', label: 'Base' }, { value: 'plus', label: 'Plus' }]} />
+              <Segmented className="mt-3" value={plan.tier} onChange={(t) => act(async () => api.patch('/promotions', { tier: t, payment_method: t === 'plus' ? await pay(PLUS_ADDON_CENTS, 'Wamiwa Agent Plus add-on · this month') : undefined }), t === 'plus' ? 'Moved to Plus' : 'Moved to base', t === 'plus' ? 'The extra $10 is charged now and with each renewal.' : 'All links stay saved; only the first ones within the limit are shared.')} options={[{ value: 'base', label: 'Base' }, { value: 'plus', label: 'Plus' }]} />
             </Card>
             <Card className="p-5">
               <div className="text-[13px] font-bold text-ink">Pause</div>

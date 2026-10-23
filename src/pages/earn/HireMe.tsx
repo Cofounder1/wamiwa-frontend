@@ -8,19 +8,20 @@ import { usd } from '@/lib/format'
 import { Badge, Button, Callout, Card, CardHeader, Field, Input, PageHeader, Switch, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 
-interface InfluencerPage { photos: string[]; videos: string[]; starting_price_cents: number; available: boolean; past_hires: number; rating: number | null }
+interface InfluencerPage { photos: string[]; videos: string[]; starting_price_cents: number; available: boolean; open_to_equity?: boolean; past_hires: number; rating: number | null }
 
 export default function HireMe() {
-  const { me } = useSession()
+  const { me, role } = useSession()
   const profile = useApi((s) => api.get<ProfileDto>(`/profiles/${me.handle}`, undefined, s), [me.handle])
   const page = useApi((s) => api.get<InfluencerPage>(`/hire-me/influencers/${me.id}`, undefined, s).catch(() => null), [me.id])
   const [price, setPrice] = useState(0)
   const [photos, setPhotos] = useState<string[]>([])
   const [available, setAvailable] = useState(true)
+  const [equityOpen, setEquityOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    if (page.data) { setPhotos(page.data.photos); setAvailable(page.data.available) }
+    if (page.data) { setPhotos(page.data.photos); setAvailable(page.data.available); setEquityOpen(!!page.data.open_to_equity) }
     const cents = page.data?.starting_price_cents ?? profile.data?.hire_me?.starting_price_cents
     if (cents) setPrice(cents / 100)
   }, [page.data, profile.data])
@@ -40,6 +41,10 @@ export default function HireMe() {
     setAvailable(v)
     try { await api.put('/hire-me/availability', { available: v }); toast(v ? 'You’re available for hire' : 'Hire Me page hidden', v ? undefined : 'New offers are blocked. Active contracts continue.') } catch (e) { setAvailable(!v); toast('Couldn’t update', e instanceof ApiError ? e.message : undefined, 'danger') }
   }
+  const setEquity = async (v: boolean) => {
+    setEquityOpen(v)
+    try { await api.put('/hire-me/equity', { open_to_equity: v }); toast(v ? 'Open to equity offers' : 'Equity offers turned off', v ? 'Brands can offer shares alongside cash. Cash can then be as low as half your starting price.' : undefined) } catch (e) { setEquityOpen(!v); toast('Couldn’t update', e instanceof ApiError ? e.message : undefined, 'danger') }
+  }
   const addPhoto = async (f?: File) => {
     if (!f) return
     const form = new FormData(); form.append('kind', 'image'); form.append('file', f)
@@ -54,6 +59,11 @@ export default function HireMe() {
         <div className="space-y-6">
           <Card className="p-5">
             <Switch checked={!available} onChange={(v) => setAvail(!v)} label="Not available to work as human" description="Hides this page and blocks new offers. Active contracts continue." />
+            {role !== 'minor' && page.data && (
+              <div className="mt-4 border-t border-line pt-4">
+                <Switch checked={equityOpen} onChange={setEquity} label="Open to equity offers" description="Registered companies can offer shares alongside cash; the cash part can be as low as half your starting price. Wamiwa records the equity but doesn’t hold or guarantee it." />
+              </div>
+            )}
           </Card>
           <Card>
             <CardHeader title="Pricing & niche" />

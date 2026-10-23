@@ -107,3 +107,6 @@ export function editMinutesLeft(createdAt: string, now = Date.now()) {
   const left = LIMITS.editWindowMinutes * 60_000 - (now - new Date(createdAt).getTime())
   return left > 0 ? Math.max(1, Math.ceil(left / 60_000)) : 0
 }
+
+/** HM-06: each side's Wamiwa service fee on an equity-only deal (backend setting equity_service_fee_cents). */
+export const EQUITY_FEE_CENTS = 5_00

@@ -10,6 +10,8 @@ import { cn } from '@/lib/cn'
 import { Avatar, Badge, Button, Callout, Card, CardHeader, Field, PageHeader, Progress, Segmented, Select, Switch, Tabs, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { SplitBar, TimeChart } from '@/components/charts/Charts'
+import { pay } from '@/components/payments/PaymentSheet'
+import { isCancelled } from '@/api/payments'
 
 /* ── FD-06 + WA-08 Analytics ─────────────────────────────────────────────── */
 
@@ -140,18 +142,20 @@ export function AIVideo() {
   const generate = async () => {
     setBusy(true)
     try {
-      await api.post('/ai-videos', { script, seconds, tier, payment_method: (quote.data?.price_cents ?? 0) > 0 ? 'tok_visa' : null })
+      const cents = quote.data?.price_cents ?? 0
+      const payment_method = cents > 0 ? await pay(cents, `AI video · ${seconds}s ${tier}`) : null
+      await api.post('/ai-videos', { script, seconds, tier, payment_method })
       toast('Generating your video', 'Jobs over 10 minutes notify you when done. If it fails, you get a retry or an automatic refund.')
       setScript(''); list.reload(); quote.reload(); plan.reload()
-    } catch (e) { toast('Couldn’t start', errMsg(e), 'danger') } finally { setBusy(false) }
+    } catch (e) { if (!isCancelled(e)) toast('Couldn’t start', errMsg(e), 'danger') } finally { setBusy(false) }
   }
   const planAction = async (action: 'subscribe' | 'cancel') => {
     setPlanBusy(true)
     try {
-      if (action === 'subscribe') { await api.post('/ai-videos/plan', { payment_method: 'tok_visa' }); toast('Video plan started', '15 videos this month, up to 2 minutes each.') }
+      if (action === 'subscribe') { await api.post('/ai-videos/plan', { payment_method: await pay(plan.data!.terms.price_cents, 'AI video plan · first month') }); toast('Video plan started', '15 videos this month, up to 2 minutes each.') }
       else { await api.del('/ai-videos/plan'); toast('Plan cancelled', 'Your videos stay usable until the month ends.') }
       plan.reload(); quote.reload()
-    } catch (e) { toast('Couldn’t update the plan', errMsg(e), 'danger') } finally { setPlanBusy(false) }
+    } catch (e) { if (!isCancelled(e)) toast('Couldn’t update the plan', errMsg(e), 'danger') } finally { setPlanBusy(false) }
   }
   const download = async (id: string) => {
     try {
@@ -289,10 +293,19 @@ export function Subscription() {
   const period = current ? (s.period ?? 'monthly') : cycle
   const run = async (key: string, call: () => Promise<unknown>, title: string, body?: string) => {
     setBusy(key)
-    try { await call(); toast(title, body); sub.reload(); void refreshMe() } catch (e) { toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(null) }
+    try { await call(); toast(title, body); sub.reload(); void refreshMe() } catch (e) { if (!isCancelled(e)) toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(null) }
   }
-  const subscribe = (tier: Tier) => run(tier, () => api.post('/subscriptions', { payment_method: 'tok_visa', period: cycle, tier }), 'Subscribed!', tier === 'pro' ? 'Your partner suggestions are ready.' : 'Daily ideas start tomorrow morning.')
-  const change = (tier: Tier) => run(tier, () => api.patch('/subscriptions', { payment_method: 'tok_visa', tier }),
+  const plansData = plans.data
+  const subscribe = (tier: Tier) => run(tier, async () => api.post('/subscriptions', {
+    payment_method: await pay(plansData.tiers[tier][cycle].usd_cents, `${plansData.tiers[tier].name} subscription · ${cycle}`), period: cycle, tier }), 'Subscribed!', tier === 'pro' ? 'Your partner suggestions are ready.' : 'Daily ideas start tomorrow morning.')
+  // Moving up to Pro costs the difference for the days left (the backend quotes it); anything else isn't charged.
+  const change = (tier: Tier) => run(tier, async () => {
+    const charged = tier === 'pro' && current !== 'pro'
+    const payment_method = charged
+      ? await pay((await api.get<{ amount_cents: number }>('/subscriptions/upgrade-quote')).amount_cents, 'Upgrade to Pro for the rest of this period')
+      : 'not_charged'
+    return api.patch('/subscriptions', { payment_method, tier })
+  },
     tier === 'pro' ? 'Upgraded to Pro' : current === 'pro' && s.next_tier ? 'Staying on Pro' : 'Switching to Creator',
     tier === 'pro' ? (s.next_tier ? 'Your plan stays on Pro.' : 'You paid only the difference for the days left.') : `Pro stays on until ${date(s.renews_at!)}.`)
   const rows = [

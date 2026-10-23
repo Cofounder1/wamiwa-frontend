@@ -16,6 +16,8 @@ import { ErrorState, Spinner } from '@/components/ui/states'
 import { BarList } from '@/components/charts/Charts'
 import type { PlanDto } from '@/pages/wamiwa/WamiwaAgent'
 import { RegionSelect, regionName, useRegions } from '@/components/ui/RegionPicker'
+import { pay } from '@/components/payments/PaymentSheet'
+import { isCancelled } from '@/api/payments'
 
 const cap = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
 
@@ -219,7 +221,7 @@ export function Billing() {
   const pr = prices.data
   const act = async (fn: () => Promise<unknown>, msg: string) => {
     setBusy(true)
-    try { await fn(); toast(msg); plan.reload(); payments.reload() } catch (e) { toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(false) }
+    try { await fn(); toast(msg); plan.reload(); payments.reload() } catch (e) { if (!isCancelled(e)) toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(false) }
   }
   const cards = [
     { id: null, name: 'Pay per video', price: usd(pr.pay_per_video_cents / 100), sub: `per video, up to ${pr.included_seconds}s`, note: '4 drafts + 2 finals' },
@@ -238,7 +240,7 @@ export function Billing() {
               <div className="flex items-center justify-between"><span className="font-bold text-ink">{p.name}</span>{current && <Badge>Current</Badge>}</div>
               <div className="mt-2 text-[28px] font-extrabold text-ink num">{p.price}<span className="ml-1 text-[13px] font-normal text-ink-2">{p.sub}</span></div>
               <div className="text-[12.5px] text-ink-2">{p.note}</div>
-              {!current && p.id && <Button size="sm" className="mt-4" loading={busy} onClick={() => act(() => api.post('/video-plans', { plan: p.id, payment_method: 'tok_visa' }), `${p.name} plan started`)}>Choose {p.name}</Button>}
+              {!current && p.id && <Button size="sm" className="mt-4" loading={busy} onClick={() => act(async () => api.post('/video-plans', { plan: p.id, payment_method: await pay(pr.plans[p.id as 'growth' | 'scale'].price_cents, `${p.name} video plan · first month`) }), `${p.name} plan started`)}>Choose {p.name}</Button>}
             </div>
           )
         })}

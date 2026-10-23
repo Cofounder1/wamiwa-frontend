@@ -7,6 +7,8 @@ import { usd } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import { Button, Callout, Field, Input, Modal, Segmented, toast } from '@/components/ui/primitives'
 import { Spinner } from '@/components/ui/states'
+import { pay } from '@/components/payments/PaymentSheet'
+import { isCancelled } from '@/api/payments'
 
 /** MS-05: hire a marketplace agent to summarize this chat, or draw insights from it. */
 interface Offer { id: string; handle: string; name: string; price_cents: number; rating: number | null; completed_orders: number }
@@ -25,12 +27,13 @@ export function SummarizeChat({ open, onClose, conversationId }: { open: boolean
     if (!chosen) return
     setBusy(true)
     try {
+      const payment_method = await pay(chosen.price_cents, `Chat ${kind} by ${chosen.name}`)
       const order = await api.post<{ id: string }>('/chat-insights', {
-        conversation_id: conversationId, agent_id: chosen.id, kind, question: question || null, payment_method: 'tok_visa' })
+        conversation_id: conversationId, agent_id: chosen.id, kind, question: question || null, payment_method })
       toast('Order placed', `${chosen.name} will deliver it in the order thread.`)
       onClose()
       nav(`/app/orders/${order.id}`)
-    } catch (e) { toast('Couldn’t place the order', errMsg(e), 'danger') } finally { setBusy(false) }
+    } catch (e) { if (!isCancelled(e)) toast('Couldn’t place the order', errMsg(e), 'danger') } finally { setBusy(false) }
   }
 
   return (

@@ -15,6 +15,7 @@ import { cn } from '@/lib/cn'
 import { Badge, Button, Callout, Card, CardHeader, Checkbox, Empty, Field, Input, KV, Modal, PageHeader, Progress, Tabs, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, LoadMore, Spinner } from '@/components/ui/states'
 import { DisputeModal } from './Disputes'
+import { EquityTerms } from '@/components/social/EquityTerms'
 
 const typeMeta = {
   hire_me: { label: 'Hire Me', icon: Briefcase, tone: 'brand' as const },
@@ -162,6 +163,7 @@ export default function ContractDetail() {
                 ))}
               </ul>
               {dto.delivery && <div className="mx-5 mb-5 rounded-2xl bg-surface-2 p-4 text-[14px] whitespace-pre-wrap text-ink"><div className="mb-1 text-[12px] font-bold text-ink-2">Delivery{dto.partial_delivery ? ' (partial)' : ''}</div>{dto.delivery}</div>}
+              {dto.equity && <div className="mx-5 mb-5"><EquityTerms equity={dto.equity} contractId={dto.id} onChanged={res.reload} /></div>}
               {dto.no_ai_replies && <div className="mx-5 mb-5 flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-[12.5px] text-ink-2"><Bot className="size-4" />“No AI replies”: auto-replies are off on this contract’s sponsored posts only.</div>}
               <div className="flex flex-wrap gap-2 border-t border-line p-5">
                 {isEarner && st === 'offered' && <Button to="/app/offers">Respond in Offers</Button>}

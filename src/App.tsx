@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { AppShell } from '@/components/layout/AppShell'
 import { Toaster } from '@/components/ui/primitives'
+import { PaymentHost } from '@/components/payments/PaymentSheet'
 import Landing from '@/pages/marketing/Landing'
 
 /** Lazy-load a named export so each area ships as its own chunk. */
@@ -196,6 +197,7 @@ export default function App() {
         </Routes>
       </Suspense>
       <Toaster />
+      <PaymentHost />
     </>
   )
 }
