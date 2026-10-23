@@ -193,9 +193,10 @@ export const TERMS: LegalDoc = {
     },
     {
       id: 'subscriptions', title: 'Subscriptions, AI video and brand video plans', blocks: [
-        { p: '12.1 **Creator subscription.** The subscription costs $10 per month or $100 per year, charged in Naira at the day\'s rate. It adds daily post ideas, the right to contact Companies first about your Likeness, auto-reply Agents and one free standard minute of AI video each month.' },
+        { p: '12.1 **Creator and Pro subscriptions.** The Creator subscription costs $10 per month or $100 per year, and the Pro subscription costs $16 per month or $160 per year, both charged in Naira at the day\'s rate. Creator adds daily post ideas, the right to contact Companies first about your Likeness, auto-reply Agents and one free standard minute of AI video each month. Pro includes everything in Creator, plus suggested partner businesses, content ideas for the countries you choose and, for adults, chat summaries by a hired Agent. If you move up from Creator to Pro, Pro starts at once and you pay only the difference for the days left; a move back to Creator takes effect at your next renewal.' },
         { p: '12.2 **Renewal and cancellation.** Subscriptions renew automatically until you cancel. Cancellation takes effect at the end of the paid period, and we do not refund part-periods except where the law requires. If your subscription lapses, only the extra features stop; your contracts and earnings are not affected.' },
         { p: '12.3 **AI video for users.** You may pay to generate AI video of yourself at $3 per minute (standard) or $25 per minute (premium). Payment is taken before generation. You may generate only your own verified face. Every video is labelled AI-generated on the Platform and watermarked when downloaded. If generation fails after payment, you get a retry or an automatic refund.' },
+        { p: '12.3A **AI video plan.** Instead of paying per minute, adults may buy the AI video plan at $30 per month for 15 standard-quality videos of up to 2 minutes each. A longer video uses one plan video for each started 2 minutes, up to 30 minutes a month. Plan videos reset at each monthly renewal and do not carry over, and a plan video that fails to generate is given back. Premium video is always charged per minute. The plan is separate from the Creator and Pro subscriptions, and cancelling it keeps it until the end of the month already paid for.' },
         { p: '12.4 **Brand video production.** Brands pay for likeness video production on top of the influencer\'s Likeness price:' },
         { table: { head: ['Option', 'Price', 'Includes'], rows: [
           ['Pay per video (up to 60 seconds)', '$45', '5 draft previews and 2 final renders'],
@@ -360,7 +361,7 @@ export const PRIVACY: LegalDoc = {
           '**Other users:** when a collaborator credits you, tags you or lists you in a royalty split.',
         ] },
         { p: '**3.4 Sensitive personal data**' },
-        { p: 'We do not intentionally collect sensitive personal data. If a feature requires it (for example, facial verification for identity checks or accessibility needs for events), we will collect it only with your explicit consent or where the law otherwise permits, and we will apply additional safeguards.' },
+        { p: 'We collect some sensitive personal data because we need it to protect our users, especially minors, and to improve our services. This includes your face and a live selfie for identity and liveness checks, the face images and voice samples you choose to provide for AI likeness and AI video, and the recorded confirmation calls in which a guardian approves a minor\'s contract. We collect it only with your explicit consent or where the law otherwise permits, use it only for these purposes, and apply additional safeguards.' },
       ],
     },
     {
