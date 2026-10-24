@@ -10,7 +10,7 @@ import { compact, date } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import { Badge, Button, Callout, Card, CardHeader, Field, Input, Modal, PageHeader, Progress, Select, Tabs, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
-import { LiveCheck, type LiveCapture } from '@/components/ui/LiveCheck'
+import { IdLiveCheck, type LiveResult } from '@/components/ui/IdLiveCheck'
 import { RegionSelect } from '@/components/ui/RegionPicker'
 
 type Tab = 'id' | 'bank' | 'social' | 'public'
@@ -39,23 +39,36 @@ export default function Verification() {
 interface IdStatus { id_verified: boolean; attempts_left?: number; latest: { status: string; reason: string | null; submitted_at: string } | null }
 
 function IdentityTab() {
-  const { role, refreshMe } = useSession()
+  const { role, refreshMe, me, meDto } = useSession()
   const res = useApi((s) => api.get<IdStatus>('/verification/identity', undefined, s), [])
   const [doc, setDoc] = useState<'national_id' | 'drivers_licence' | 'passport'>('national_id')
   const [docFile, setDocFile] = useState<File>()
-  const [live, setLive] = useState<LiveCapture>()
+  const [idNumber, setIdNumber] = useState('')
+  const [live, setLive] = useState<LiveResult>()
   const [busy, setBusy] = useState(false)
   if (res.error) return <ErrorState error={res.error} onRetry={res.reload} />
   if (!res.data) return <Spinner />
   const s = res.data
+  // In Nigeria a NIN or driver's licence is looked up by its number; a passport or a foreign ID is sent as a photo.
+  const lookup = (!meDto?.region || meDto.region === 'nigeria') && doc !== 'passport'
+  const ready = !!live && (lookup ? idNumber.replace(/\s/g, '').length >= 6 : !!docFile)
   const submit = async () => {
     setBusy(true)
     try {
-      // The live check is uploaded as private files: never shown back to anyone.
-      const [document_ref, selfie_ref, liveness_ref] = await Promise.all([upload('id_document', docFile!), upload('liveness', live!.frame), upload('liveness', live!.clip)])
-      const r = await api.post<{ status: string; reason?: string }>('/verification/identity', { document_type: doc, document_ref, selfie_ref, liveness_ref })
-      toast(r.status === 'passed' ? 'Identity verified' : 'Submitted', r.status === 'passed' ? 'You can now earn on Wamiwa.' : r.reason ?? 'We’ll let you know the result.')
-      setDocFile(undefined); setLive(undefined); res.reload(); void refreshMe()
+      const body: Record<string, string> = { document_type: doc }
+      if (lookup) body.id_number = idNumber.replace(/\s/g, '')
+      else body.document_ref = await upload('id_document', docFile!)
+      if (live!.kind === 'youverify') body.liveness_session_id = live!.sessionId
+      else {
+        // Wamiwa's own camera check is uploaded as private files: never shown back to anyone.
+        const [selfie_ref, liveness_ref] = await Promise.all([upload('liveness', live!.capture.frame), upload('liveness', live!.capture.clip)])
+        Object.assign(body, { selfie_ref, liveness_ref })
+      }
+      const r = await api.post<{ status: string; reason?: string }>('/verification/identity', body)
+      toast(r.status === 'passed' ? 'Identity verified' : r.status === 'manual_review' ? 'We’re checking your document' : 'Not verified',
+        r.status === 'passed' ? 'You can now earn on Wamiwa.' : r.status === 'manual_review' ? 'Our team usually replies within 24 hours.' : r.reason ?? 'Try again.',
+        r.status === 'failed' ? 'danger' : undefined)
+      setDocFile(undefined); setIdNumber(''); setLive(undefined); res.reload(); void refreshMe()
     } catch (e) { toast('Verification failed', errMsg(e), 'danger') } finally { setBusy(false) }
   }
   return (
@@ -64,7 +77,7 @@ function IdentityTab() {
         {role === 'minor' && <Callout className="mb-5" tone="brand">For under-18s, your guardian provides the ID.</Callout>}
         <div className="mb-5 flex items-center justify-between">
           <h3 className="text-[16px] font-bold text-ink">Verify your identity</h3>
-          <Badge tone={s.id_verified ? 'success' : s.latest?.status === 'failed' ? 'danger' : 'warn'}>{s.id_verified ? 'Verified' : s.latest ? s.latest.status : 'Not started'}</Badge>
+          <Badge tone={s.id_verified ? 'success' : s.latest?.status === 'failed' ? 'danger' : 'warn'}>{s.id_verified ? 'Verified' : s.latest ? (s.latest.status === 'manual_review' ? 'With our team' : s.latest.status) : 'Not started'}</Badge>
         </div>
         {s.id_verified ? (
           <Callout tone="success" icon={<ShieldCheck />} title="You’re verified">Verified {s.latest ? date(s.latest.submitted_at) : ''}. Your verified name can only change through a new ID check.</Callout>
@@ -79,10 +92,18 @@ function IdentityTab() {
               ))}
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <label className={cn('flex cursor-pointer flex-col items-center gap-1 rounded-2xl border-2 border-dashed py-6 text-[13px]', docFile ? 'border-teal bg-teal-soft text-teal' : 'border-line-strong text-ink-2 hover:border-brand')}><Upload className="size-5" />{docFile ? docFile.name : 'Photo of the document'}<span className="text-[11.5px] opacity-70">Front, no glare</span><input type="file" accept="image/*,.pdf" className="sr-only" onChange={(e) => setDocFile(e.target.files?.[0])} /></label>
-              <LiveCheck value={live} onChange={setLive} />
+              {lookup ? (
+                <Field label={doc === 'national_id' ? 'Your NIN' : 'Your driver’s licence number'}
+                       hint={doc === 'national_id' ? 'The 11-digit number on your NIN slip or card. We check it with the government record.' : 'As printed on your licence. We check it with the government record.'}>
+                  <Input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} inputMode={doc === 'national_id' ? 'numeric' : 'text'}
+                         autoComplete="off" placeholder={doc === 'national_id' ? '12345678901' : 'ABC12345AA12'} />
+                </Field>
+              ) : (
+                <label className={cn('flex cursor-pointer flex-col items-center gap-1 rounded-2xl border-2 border-dashed py-6 text-[13px]', docFile ? 'border-teal bg-teal-soft text-teal' : 'border-line-strong text-ink-2 hover:border-brand')}><Upload className="size-5" />{docFile ? docFile.name : `Photo of your ${doc === 'passport' ? 'passport photo page' : 'ID'}`}<span className="text-[11.5px] opacity-70">Clear, no glare, under 1 MB if you can. Our team confirms it.</span><input type="file" accept="image/jpeg,image/png" className="sr-only" onChange={(e) => setDocFile(e.target.files?.[0])} /></label>
+              )}
+              <IdLiveCheck value={live} onChange={setLive} firstName={(me.name || 'there').split(' ')[0]} />
             </div>
-            <Button className="mt-5" icon={<Camera className="size-4" />} disabled={!docFile || !live} loading={busy} onClick={submit}>Submit for verification</Button>
+            <Button className="mt-5" icon={<Camera className="size-4" />} disabled={!ready} loading={busy} onClick={submit}>Submit for verification</Button>
           </>
         )}
       </Card>
