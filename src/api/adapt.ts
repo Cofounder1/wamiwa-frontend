@@ -123,7 +123,7 @@ function commentLabel(c: CommentDto): CommentLabel {
   if (c.sponsored) return 'wamiwa'
   if (c.on_behalf_of) return 'autoreply'
   if (c.label === 'human' || c.label === 'agent') return c.label
-  return 'api' // company replies through the API carry the Agent label (Terms 13.4)
+  return 'api' // company replies through the API carry no tag (API-02)
 }
 
 /** Flattens the API's nested reply tree, and turns pending agent tags into placeholder replies. */
