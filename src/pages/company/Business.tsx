@@ -191,7 +191,7 @@ Idempotency-Key: 7c1e2b9a-reply-cm6
           </ul>
         </Card>
       </div>
-      <Callout className="mt-6" tone="neutral">Replies made through the API appear under your company name with the Agent label. They don’t count as human engagement and are left out of sentiment.</Callout>
+      <Callout className="mt-6" tone="neutral">Replies made through the API appear under your company name with no Human or Agent tag. They don’t count as human engagement and are left out of sentiment.</Callout>
       <Modal open={creating} onClose={() => setCreating(false)} size="sm" title="Create an API key" footer={<Button loading={busy} disabled={name.length < 2} onClick={create}>Create</Button>}>
         <Field label="Name" hint="So you know where it’s used."><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Content pipeline" /></Field>
       </Modal>

@@ -7,7 +7,7 @@ import { Avatar } from '@/components/ui/primitives'
 
 /**
  * Epic 2 labeling. Labels are system-set and never editable by users.
- * Company replies sent through the API carry the Agent label (Terms 13.4).
+ * Company API replies deliberately render no tag (API-02).
  */
 export function WhoTag({ label, onBehalfOf, className }: { label: Label | CommentLabel; onBehalfOf?: string; className?: string }) {
   const base = 'inline-flex items-center gap-1 rounded-badge px-1.5 text-[10.5px] leading-[18px] font-bold uppercase tracking-[0.04em] whitespace-nowrap'
@@ -27,7 +27,7 @@ export function WhoTag({ label, onBehalfOf, className }: { label: Label | Commen
     case 'sponsored':
       return <span className={cn(base, 'border border-line-strong text-ink-2', className)}>Sponsored</span>
     case 'api':
-      return <span className={cn(base, 'bg-agent-soft text-agent', className)} title="Sent through the company’s API"><Bot className="size-3" strokeWidth={2.75} />Agent</span>
+      return null
   }
 }
 
