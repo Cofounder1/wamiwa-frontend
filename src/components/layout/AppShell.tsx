@@ -9,6 +9,7 @@ import { Logo, LogoMark } from '@/components/ui/Logo'
 import { ADMIN_NAV, NAV, type NavGroup } from './nav'
 import { CommandPalette } from './CommandPalette'
 import { FeedbackPrompt } from './FeedbackPrompt'
+import { TestModeBanner } from '@/components/layout/TestModeBanner'
 
 /** Unread notifications, refreshed on navigation and every minute. */
 function useUnread(enabled: boolean) {
@@ -74,6 +75,7 @@ export function AppShell({ admin }: { admin?: boolean }) {
           <button onClick={() => setPalette(true)} aria-label="Search" className="grid size-10 place-items-center rounded-full hover:bg-wash"><Search className="size-5" /></button>
           {!admin && <Link to="/app/notifications" aria-label="Notifications" className="relative grid size-10 place-items-center rounded-full hover:bg-wash"><Bell className="size-5" /><span className="absolute top-2 right-2.5 size-2 rounded-full bg-brand ring-2 ring-surface" /></Link>}
         </header>
+        <TestModeBanner />
         <main className="mx-auto w-full max-w-[1200px] px-4 pt-6 pb-28 sm:px-6 lg:px-10 lg:pt-10">
           <Outlet />
         </main>

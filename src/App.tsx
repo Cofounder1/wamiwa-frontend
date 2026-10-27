@@ -93,6 +93,7 @@ const DisputeDetail = lz(AO, 'DisputeDetail')
 const Payouts = lz(AO, 'Payouts')
 const MinorContracts = lz(AO, 'MinorContracts')
 const AdminManagement = lz(AO, 'AdminManagement')
+const GoLive = lz(AO, 'GoLive')
 const AuditLog = lz(AO, 'AuditLog')
 const CategoryMap = lz(AO, 'CategoryMap')
 const Keywords = lz(AO, 'Keywords')
@@ -186,6 +187,7 @@ export default function App() {
             <Route path="minors" element={<MinorContracts />} />
             <Route path="health" element={<QueueHealth />} />
             <Route path="admins" element={<AdminManagement />} />
+            <Route path="go-live" element={<GoLive />} />
             <Route path="audit" element={<AuditLog />} />
             <Route path="feedback" element={<Feedback />} />
             <Route path="category-map" element={<CategoryMap />} />

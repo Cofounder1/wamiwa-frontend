@@ -606,3 +606,55 @@ export function Keywords() {
   )
 }
 
+
+interface PlatformStatus { test_mode: boolean; launched_at: string | null; test_money_left: Record<string, number> }
+
+/** Super Admin: switch payments from the test keys to the live ones, once and for good. */
+export function GoLive() {
+  const res = useApi((s) => api.get<PlatformStatus>('/admin/platform', undefined, s), [])
+  const [code, setCode] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (res.error) return <ErrorState error={res.error} onRetry={res.reload} />
+  if (!res.data) return <Spinner />
+  const s = res.data
+  const left = Object.entries(s.test_money_left).filter(([, n]) => n > 0)
+  const go = async () => {
+    setBusy(true)
+    try {
+      await api.post('/admin/platform/go-live', { totp_code: code, confirm })
+      toast('Wamiwa is live', 'Payments now use the live keys. Logged in the audit log.')
+      setCode(''); setConfirm(''); res.reload()
+    } catch (e) { toast('Not switched', errMsg(e), 'danger') } finally { setBusy(false) }
+  }
+  return (
+    <div>
+      <PageHeader eyebrow="Super Admin" title="Go live" subtitle="Until now, payments use the test keys and no real money moves. Going live switches to the live keys for good." />
+      {s.launched_at ? (
+        <Callout tone="success" icon={<Check />} title="Wamiwa is live">Since {dateTime(s.launched_at)}. Payments use the live keys. This can’t be undone, and test data can no longer be reset.</Callout>
+      ) : (
+        <Card className="max-w-2xl p-6">
+          <ol className="mb-5 list-decimal space-y-1.5 pl-5 text-[13.5px] text-ink-2">
+            <li>Make sure the live Flutterwave (and PayPal) keys are set on Render, beside the test ones.</li>
+            <li>Clear the test data from a laptop: <code className="rounded bg-wash px-1">python -m app.cli reset-test-data --database-url …</code></li>
+            <li>Then go live here. Testers’ accounts and payments will be gone.</li>
+          </ol>
+          {left.length > 0 ? (
+            <Callout tone="warn" icon={<AlertTriangle />} title="Test payments are still recorded">
+              {left.map(([k, n]) => `${n} ${k}`).join(', ')}. Run the reset first; going live is refused until they’re gone.
+            </Callout>
+          ) : (
+            <Callout tone="success" icon={<ShieldCheck />} title="No test payments left">Ready to go live.</Callout>
+          )}
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <Field label="Two-factor code"><Input inputMode="numeric" autoComplete="one-time-code" maxLength={8} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} /></Field>
+            <Field label="Type GO LIVE to confirm"><Input value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="GO LIVE" /></Field>
+          </div>
+          <Button className="mt-5" variant="danger" icon={<Lock className="size-4" />} loading={busy}
+                  disabled={left.length > 0 || code.length < 6 || confirm.trim() !== 'GO LIVE'} onClick={go}>Go live for good</Button>
+          <p className="mt-3 text-[12.5px] text-ink-3">There’s no way back to test mode afterwards. To test again later, use a separate site with its own database.</p>
+        </Card>
+      )}
+    </div>
+  )
+}
