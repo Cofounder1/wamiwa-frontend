@@ -12,18 +12,24 @@ import { Badge, Button, Callout, Card, CardHeader, Checkbox, Field, Input, Modal
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { RegionPicker, regionName, useRegions } from '@/components/ui/RegionPicker'
 import { pay } from '@/components/payments/PaymentSheet'
-import { isCancelled } from '@/api/payments'
+import { isCancelled, paymentMethod } from '@/api/payments'
 
 type Kind = 'business' | 'seller' | 'artist' | 'label'
-/** The Plus add-on charged when moving up mid-month (backend setting promo_plus_addon_cents). */
+/** Fallback for the Plus add-on (backend setting promo_plus_addon_cents) until /promotions/plans has loaded. */
 const PLUS_ADDON_CENTS = 10_00
+/** The Plus add-on from the backend's prices: Plus minus Base for this kind of plan. */
+const plusAddon = (plans: PlansDto | undefined, kind: Kind) => plans ? plans.prices[kind].plus.usd_cents - plans.prices[kind].base.usd_cents : PLUS_ADDON_CENTS
+const REFUND_NOTE = 'If you were charged, it is refunded automatically within the hour.'
+/** Plans that can be bought again: they ended unpaid, or were turned down at review. */
+const REBUY = ['lapsed', 'rejected']
+const STATUS_TEXT: Record<string, string> = { active: 'active', paused: 'paused', pending_review: 'waiting for review', lapsed: 'ended', rejected: 'not approved', suspended: 'suspended' }
 interface PlanPrice { usd_cents: number; local: number; links: number }
 interface PlansDto { currency: string; prices: Record<Kind, { base: PlanPrice; plus: PlanPrice }>; label_roster_size: number; packages: Record<'base' | 'plus', string> }
 interface NameDto { id: string; name: string; status: string; matches_in_plain_text: boolean; default_link: { label: string; url: string } | null }
 interface LinkDto { id: string; url: string; label: string; keywords: string[]; name_id: string | null; shared_by_agent: boolean; under_review: boolean; review_reason: string | null }
 export interface PlanDto {
   id: string; kind: Kind; tier: 'base' | 'plus'; status: string; category: string | null; target_regions: string[]; cancel_at_period_end: boolean
-  renews_at: string; price_cents: number; link_limit: number; link_limit_applies: string; names: NameDto[]; links: LinkDto[]; default_link_rule?: string
+  renews_at: string | null; price_cents: number; link_limit: number; link_limit_applies: string; names: NameDto[]; links: LinkDto[]; default_link_rule?: string
 }
 
 const KIND_NAME: Record<Kind, string> = { business: 'Business', seller: 'Individual seller', artist: 'Artist', label: 'Record label' }
@@ -33,41 +39,66 @@ export default function WamiwaAgent() {
   if (role === 'minor') return <Callout tone="neutral" icon={<Lock />} title="Not available for under-18s">The Wamiwa Agent and all sponsored content are adults-only.</Callout>
   if (plan.error) return <ErrorState error={plan.error} onRetry={plan.reload} />
   if (plan.loading) return <Spinner />
+  if (plan.data && REBUY.includes(plan.data.status)) return <BuyPlan onBought={plan.reload} previous={plan.data} />
   return plan.data ? <ManagePlan plan={plan.data} reload={plan.reload} /> : <BuyPlan onBought={plan.reload} />
 }
 
 /* ── WA-01 Buy ──────────────────────────────────────────────────────────── */
 
-function BuyPlan({ onBought }: { onBought: () => void }) {
+function BuyPlan({ onBought, previous }: { onBought: () => void; previous?: PlanDto }) {
   const { me, role } = useSession()
   const company = role === 'company'
   const prices = useApi((s) => api.get<PlansDto>('/promotions/plans', undefined, s), [])
+  const method = useApi(() => paymentMethod(), [])
   const kinds: Kind[] = company ? ['business', 'label'] : ['seller', 'artist']
-  const [kind, setKind] = useState<Kind>(kinds[0])
-  const [tier, setTier] = useState<'base' | 'plus'>('base')
-  const [name, setName] = useState(company ? me.name : '')
-  const [category, setCategory] = useState(me.category?.toLowerCase() ?? 'fashion')
+  const [kind, setKind] = useState<Kind>(previous && kinds.includes(previous.kind) ? previous.kind : kinds[0])
+  const [tier, setTier] = useState<'base' | 'plus'>(previous?.tier ?? 'base')
+  const [name, setName] = useState(company ? me.name : previous?.names[0]?.name ?? '')
+  const [category, setCategory] = useState(previous?.category?.replace(/_/g, ' ') ?? me.category?.toLowerCase() ?? 'fashion')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<ApiError>()
+  const [error, setError] = useState<{ e: ApiError | undefined; message: string; paid: boolean }>()
   if (prices.error) return <ErrorState error={prices.error} onRetry={prices.reload} />
   if (!prices.data) return <Spinner />
   const p = prices.data.prices[kind][tier]
   const needsName = kind === 'seller' || kind === 'artist'
   const needsCategory = kind === 'business' || kind === 'seller'
+  const naijaPayer = method.data?.currency === 'NGN'
+  const addon = plusAddon(prices.data, kind)
+  const categories = ['fashion', 'beauty', 'food & drinks', 'electronics', 'home']
+  if (category && !categories.includes(category)) categories.unshift(category)
 
   const buy = async () => {
-    setBusy(true); setError(undefined)
+    setError(undefined)
+    // Check everything we can here: once the person pays, a refusal means a refund rather than "no charge".
+    if (needsCategory && !category.trim()) { setError({ e: undefined, message: 'Choose the category you sell in.', paid: false }); return }
+    if (needsName && name.trim().length < 2) { setError({ e: undefined, message: kind === 'artist' ? 'Tell us your stage name.' : 'Tell us your shop name.', paid: false }); return }
+    setBusy(true)
+    let paid = false
     try {
+      const current = await api.get<PlanDto | null>('/promotions')
+      if (current && !REBUY.includes(current.status) && !current.cancel_at_period_end) {
+        setError({ e: undefined, message: 'You already have a Wamiwa Agent plan.', paid: false }); onBought(); return
+      }
       const payment_method = await pay(p.usd_cents, `Wamiwa Agent · ${kind} ${tier === 'plus' ? 'Plus' : ''} · first month`.replace(/\s+/g, ' '))
-      await api.post('/promotions', { kind, tier, category: needsCategory ? category : null, brand_name: needsName ? name : null, links: [], target_regions: [], payment_method })
+      paid = true
+      await api.post('/promotions', { kind, tier, category: needsCategory ? category : null, brand_name: needsName ? name.trim() : null, links: [], target_regions: [], payment_method })
       toast('Wamiwa Agent bought', kind === 'seller' ? 'Your shop name and links are reviewed within 2 working days.' : 'Add the links you want shared.')
       onBought()
-    } catch (e) { if (isCancelled(e)) return; setError(e instanceof ApiError ? e : undefined); toast('Couldn’t buy the plan', errMsg(e), 'danger') } finally { setBusy(false) }
+    } catch (e) {
+      if (isCancelled(e)) return
+      setError({ e: e instanceof ApiError ? e : undefined, message: errMsg(e), paid })
+      toast('Couldn’t buy the plan', paid ? `${errMsg(e)} ${REFUND_NOTE}` : errMsg(e), 'danger')
+    } finally { setBusy(false) }
   }
 
   return (
     <div>
       <PageHeader eyebrow="Wamiwa Agent" title="Get found wherever you’re mentioned" subtitle="When adults mention your name it becomes tappable. People who ask about you get your link. Sellers appear in Suggested sellers. Everything is labeled Sponsored." />
+      {previous && (
+        <Callout className="mb-6" tone={previous.status === 'rejected' ? 'danger' : 'warn'} icon={<Clock />} title={previous.status === 'rejected' ? 'Your plan wasn’t approved' : 'Your plan has ended'}>
+          {previous.status === 'rejected' ? 'Check your shop name and links, then buy the plan again. ' : 'Buy it again to switch your cards and links back on. '}Your saved names and links are kept.
+        </Callout>
+      )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-6">
           <Card className="p-6">
@@ -85,7 +116,7 @@ function BuyPlan({ onBought }: { onBought: () => void }) {
               <div className="grid gap-3 sm:grid-cols-2">
                 {(['base', 'plus'] as const).map((t) => (
                   <button key={t} onClick={() => setTier(t)} className={cn('rounded-2xl border p-4 text-left transition', tier === t ? 'border-ink bg-surface' : 'border-line hover:bg-wash')}>
-                    <div className="flex items-center gap-2 font-bold text-ink capitalize">{t}{t === 'plus' && <Badge tone="brand" icon={<Sparkles className="size-3" />}>+$10</Badge>}</div>
+                    <div className="flex items-center gap-2 font-bold text-ink capitalize">{t}{t === 'plus' && <Badge tone="brand" icon={<Sparkles className="size-3" />}>+{usd(addon / 100)}</Badge>}</div>
                     <div className="mt-1 text-[12.5px] text-ink-2">{prices.data!.packages[t]}</div>
                   </button>
                 ))}
@@ -100,9 +131,11 @@ function BuyPlan({ onBought }: { onBought: () => void }) {
                 <Input className="mt-4" value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === 'artist' ? 'Stage name' : 'Shop name'} />
               </>
             ) : <p className="mt-1 text-[13.5px] text-ink-2">Your registered business name <b className="text-ink">{me.name}</b> and @{me.handle} are linked automatically. {kind === 'label' ? 'Add your artists after buying.' : ''}</p>}
-            {needsCategory && <Field className="mt-4" label="Category" hint="Used for Suggested sellers."><Select value={category} onChange={(e) => setCategory(e.target.value)}>{['fashion', 'beauty', 'food & drinks', 'electronics', 'home'].map((c) => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}</Select></Field>}
+            {needsCategory && <Field className="mt-4" label="Category" hint="Used for Suggested sellers."><Select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((c) => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}</Select></Field>}
             {error && (
-              <Callout className="mt-4" tone="danger" action={error.code?.includes('name') ? <Button size="sm" variant="outline" to="/app/claim-name">This is my name</Button> : undefined}>{error.message} You haven’t been charged.</Callout>
+              <Callout className="mt-4" tone="danger" action={error.e?.code === 'name_taken' ? <Button size="sm" variant="outline" to="/app/claim-name">This is my name</Button> : error.e?.code === 'id_verification_required' ? <Button size="sm" variant="outline" to="/app/verify">Verify ID</Button> : error.e?.code === 'company_verification_required' ? <Button size="sm" variant="outline" to="/app/company/verify">Verify business</Button> : undefined}>
+                {error.message}{error.paid ? ` ${REFUND_NOTE}` : ''}
+              </Callout>
             )}
           </Card>
         </div>
@@ -110,12 +143,12 @@ function BuyPlan({ onBought }: { onBought: () => void }) {
           <Card className="sticky top-10 p-6">
             <div className="text-[13px] font-bold text-ink-2">{KIND_NAME[kind]} · {tier === 'plus' ? 'Plus' : 'Base'}</div>
             <div className="mt-2 flex items-baseline gap-1.5"><span className="text-[44px] leading-none font-extrabold tracking-[-0.04em] text-ink num">{usd(p.usd_cents / 100)}</span><span className="text-ink-2">/month</span></div>
-            <div className="text-[12.5px] text-ink-3">Charged {naira(p.local)} at today’s rate. Paid to Wamiwa: no escrow.</div>
+            <div className="text-[12.5px] text-ink-3">{naijaPayer ? `Charged ${naira(p.local)} at today’s rate.` : method.data ? 'Charged in US dollars.' : ''} Paid to Wamiwa: no escrow.</div>
             <ul className="mt-5 space-y-2 text-[13.5px] text-ink-2">
               {['Your name becomes a smart mention card', 'The agent answers “who is / where can I buy” with your link', kind === 'business' || kind === 'seller' ? 'Listed in Suggested sellers for your category' : 'Default link: Spotify → YouTube Music → Audiomack', `${p.links} links${kind === 'label' ? ' per artist' : ''}`, tier === 'plus' ? 'Content ideas from likely trends' : null].filter(Boolean).map((t) => <li key={t as string} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0 text-teal" />{t}</li>)}
             </ul>
-            <Button size="lg" className="mt-6 w-full" loading={busy} disabled={needsName && name.trim().length < 2} onClick={buy}>Buy for {usd(p.usd_cents / 100)}/month</Button>
-            <p className="mt-3 text-center text-[11.5px] text-ink-3">The name is checked before any money is taken. Cancel any time; it takes effect at the end of the paid month.</p>
+            <Button size="lg" className="mt-6 w-full" loading={busy} disabled={(needsName && name.trim().length < 2) || (needsCategory && !category.trim())} onClick={buy}>Buy for {usd(p.usd_cents / 100)}/month</Button>
+            <p className="mt-3 text-center text-[11.5px] text-ink-3">If the name turns out to belong to someone else after you pay, the payment is refunded automatically within the hour. Cancel any time; it takes effect at the end of the paid month.</p>
           </Card>
         </aside>
       </div>
@@ -126,6 +159,8 @@ function BuyPlan({ onBought }: { onBought: () => void }) {
 /* ── Manage (WA-01/02/03/04/09/11) ──────────────────────────────────────── */
 
 function ManagePlan({ plan, reload }: { plan: PlanDto; reload: () => void }) {
+  const prices = useApi((s) => api.get<PlansDto>('/promotions/plans', undefined, s), [])
+  const addon = plusAddon(prices.data, plan.kind)
   const [tab, setTab] = useState<'links' | 'names' | 'plan'>('links')
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -137,13 +172,34 @@ function ManagePlan({ plan, reload }: { plan: PlanDto; reload: () => void }) {
     setBusy(true)
     try { await fn(); toast(done, sub); reload() } catch (e) { if (!isCancelled(e)) toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(false) }
   }
+  // Moving up is charged now only while the plan is running (active or paused); otherwise it just changes the package.
+  const charged = plan.status === 'active' || plan.status === 'paused'
+  const setTier = async (t: 'base' | 'plus') => {
+    if (t === plan.tier) return
+    if (t !== 'plus' || !charged) {
+      return act(() => api.patch('/promotions', { tier: t }), t === 'plus' ? 'Moved to Plus' : 'Moved to base',
+        t === 'plus' ? `The extra ${usd(addon / 100)} is charged with each renewal.` : 'All links stay saved; only the first ones within the limit are shared.')
+    }
+    setBusy(true)
+    let paid = false
+    try {
+      const payment_method = await pay(addon, 'Wamiwa Agent Plus add-on · this month')
+      paid = true
+      await api.patch('/promotions', { tier: t, payment_method })
+      toast('Moved to Plus', `The extra ${usd(addon / 100)} is charged now and with each renewal.`); reload()
+    } catch (e) {
+      if (!isCancelled(e)) toast('Couldn’t update', paid ? `${errMsg(e)} ${REFUND_NOTE}` : errMsg(e), 'danger')
+    } finally { setBusy(false) }
+  }
+  const renews = plan.renews_at ? date(plan.renews_at) : null
 
   return (
     <div>
-      <PageHeader eyebrow="Wamiwa Agent" title={`${KIND_NAME[plan.kind]} plan`} subtitle={`${plan.tier === 'plus' ? 'Plus' : 'Base'} package · ${plan.cancel_at_period_end ? 'ends' : 'renews'} ${date(plan.renews_at)} · ${usd(plan.price_cents / 100)}/month`}
-        actions={<><Badge tone={statusTone[plan.status] ?? 'neutral'} dot className="!text-[13px] !leading-7 !px-3">{plan.status.replace(/_/g, ' ')}</Badge><Button variant="outline" icon={<BarChart3 className="size-4" />} to="/app/analytics">Results</Button>{plan.tier === 'plus' && <Button icon={<Lightbulb className="size-4" />} to="/app/wamiwa-agent/ideas">Content ideas</Button>}</>} />
+      <PageHeader eyebrow="Wamiwa Agent" title={`${KIND_NAME[plan.kind]} plan`} subtitle={`${plan.tier === 'plus' ? 'Plus' : 'Base'} package · ${renews ? `${plan.cancel_at_period_end ? 'ends' : 'renews'} ${renews} · ` : ''}${usd(plan.price_cents / 100)}/month`}
+        actions={<><Badge tone={statusTone[plan.status] ?? 'neutral'} dot className="!text-[13px] !leading-7 !px-3">{STATUS_TEXT[plan.status] ?? plan.status.replace(/_/g, ' ')}</Badge><Button variant="outline" icon={<BarChart3 className="size-4" />} to="/app/analytics">Results</Button>{plan.tier === 'plus' && <Button icon={<Lightbulb className="size-4" />} to="/app/wamiwa-agent/ideas">Content ideas</Button>}</>} />
 
-      {plan.kind === 'seller' && plan.status !== 'active' && <Callout className="mb-6" tone="warn" icon={<Clock />} title="Waiting for review">Shop names and links are checked by an admin within 2 working days. Your month starts when it’s approved; if it’s rejected, your first payment is refunded.</Callout>}
+      {plan.status === 'suspended' && <Callout className="mb-6" tone="danger" icon={<ShieldAlert />} title="Plan suspended">An admin suspended this plan. Cards, replies and listings are off. Contact support if you think this is a mistake.</Callout>}
+      {plan.kind === 'seller' && plan.status === 'pending_review' && <Callout className="mb-6" tone="warn" icon={<Clock />} title="Waiting for review">Shop names and links are checked by an admin within 2 working days. Your month starts when it’s approved; if it’s rejected, your first payment is refunded.</Callout>}
       {flagged.map((l) => <Callout key={l.id} className="mb-4" tone="danger" icon={<ShieldAlert />} title={`“${l.label}” is held back`}>It {l.review_reason ?? 'looks unsafe'}. It’s saved but not shared, and admins have been notified. Replace it with the full address.</Callout>)}
 
       <Tabs value={tab} onChange={setTab} tabs={[{ value: 'links', label: 'Links', count: plan.links.length }, { value: 'names', label: plan.kind === 'label' ? 'Artists' : 'Names', count: plan.names.length }, { value: 'plan', label: 'Plan & billing' }]} />
@@ -175,7 +231,8 @@ function ManagePlan({ plan, reload }: { plan: PlanDto; reload: () => void }) {
           <div className="grid gap-4 md:grid-cols-3">
             <Card className="p-5">
               <div className="text-[13px] font-bold text-ink">Package</div>
-              <Segmented className="mt-3" value={plan.tier} onChange={(t) => act(async () => api.patch('/promotions', { tier: t, payment_method: t === 'plus' ? await pay(PLUS_ADDON_CENTS, 'Wamiwa Agent Plus add-on · this month') : undefined }), t === 'plus' ? 'Moved to Plus' : 'Moved to base', t === 'plus' ? 'The extra $10 is charged now and with each renewal.' : 'All links stay saved; only the first ones within the limit are shared.')} options={[{ value: 'base', label: 'Base' }, { value: 'plus', label: 'Plus' }]} />
+              <Segmented className="mt-3" value={plan.tier} onChange={(t) => { if (!busy) void setTier(t) }} options={[{ value: 'base', label: 'Base' }, { value: 'plus', label: `Plus (+${usd(addon / 100)})` }]} />
+              {plan.tier === 'base' && <p className="mt-2 text-[12px] text-ink-3">{charged ? `Plus is charged ${usd(addon / 100)} now, then with each renewal.` : `Plus adds ${usd(addon / 100)} to each renewal.`}</p>}
             </Card>
             <Card className="p-5">
               <div className="text-[13px] font-bold text-ink">Pause</div>
@@ -185,7 +242,7 @@ function ManagePlan({ plan, reload }: { plan: PlanDto; reload: () => void }) {
             <Card className="p-5">
               <div className="text-[13px] font-bold text-ink">Cancel</div>
               <p className="mt-1 text-[12.5px] text-ink-2">Takes effect at the end of the paid month. Names and links stay saved and work again if you buy the agent again.</p>
-              {!plan.cancel_at_period_end ? <Button size="sm" variant="ghost" className="mt-3 text-danger" loading={busy} onClick={() => act(() => api.del('/promotions'), `Plan ends on ${date(plan.renews_at)}`)}>Cancel plan</Button> : <Badge tone="warn" className="mt-3">Ends {date(plan.renews_at)}</Badge>}
+              {!plan.cancel_at_period_end ? <Button size="sm" variant="ghost" className="mt-3 text-danger" loading={busy} onClick={() => act(() => api.del('/promotions'), renews ? `Plan ends on ${renews}` : 'Plan cancelled')}>Cancel plan</Button> : <Badge tone="warn" className="mt-3">{renews ? `Ends ${renews}` : 'Cancelled'}</Badge>}
             </Card>
           </div>
         )}
@@ -261,7 +318,8 @@ interface IdeasDto { day: string; regions: { region: string; fallback?: boolean;
 
 export function ContentIdeas() {
   const plan = useApi((s) => api.get<PlanDto | null>('/promotions', undefined, s), [])
-  const ideas = useApi(plan.data?.tier === 'plus' ? (s) => api.get<IdeasDto>('/promotions/content-ideas', undefined, s) : null, [plan.data?.tier, plan.data?.target_regions.join()])
+  const ideas = useApi(plan.data?.tier === 'plus' && plan.data.status === 'active' ? (s) => api.get<IdeasDto>('/promotions/content-ideas', undefined, s) : null, [plan.data?.tier, plan.data?.status, plan.data?.target_regions.join()])
+  const prices = useApi((s) => api.get<PlansDto>('/promotions/plans', undefined, s), [])
   const [saving, setSaving] = useState(false)
   const allRegions = useRegions()
   if (plan.error) return <ErrorState error={plan.error} onRetry={plan.reload} />
@@ -270,7 +328,7 @@ export function ContentIdeas() {
     <div className="mx-auto max-w-xl py-10 text-center">
       <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-brand-soft text-brand"><Sparkles className="size-6" /></div>
       <h1 className="mt-5 text-[28px] font-extrabold tracking-[-0.03em] text-ink">Content ideas come with Plus</h1>
-      <p className="mt-2 text-ink-2">Ideas based on what’s likely to trend in up to 5 regions you choose. $10 more per month, with twice the links.</p>
+      <p className="mt-2 text-ink-2">Ideas based on what’s likely to trend in up to 5 regions you choose. {usd(plusAddon(prices.data, plan.data?.kind ?? 'seller') / 100)} more per month, with twice the links.</p>
       <Button className="mt-6" size="lg" to="/app/wamiwa-agent">{plan.data ? 'Upgrade to Plus' : 'Get the Wamiwa Agent'}</Button>
     </div>
   )
@@ -286,7 +344,13 @@ export function ContentIdeas() {
         <div className="mb-3 flex items-center justify-between"><span className="flex items-center gap-2 text-[13.5px] font-bold text-ink"><Globe2 className="size-4 text-brand" />Target regions</span><span className="text-[12px] text-ink-3">{regions.length}/5 · any country, anywhere in the world</span></div>
         <RegionPicker value={regions} onChange={save} max={5} disabled={saving} />
       </Card>
-      {ideas.error ? <ErrorState error={ideas.error} onRetry={ideas.reload} /> : !ideas.data ? <Spinner className="min-h-40" /> : (
+      {plan.data.status !== 'active' ? (
+        <Callout tone="neutral" icon={<Clock />} title="Content ideas are on hold">Ideas come while your plan is active. It’s {STATUS_TEXT[plan.data.status] ?? plan.data.status.replace(/_/g, ' ')} right now.</Callout>
+      ) : ideas.error?.code === 'regions_required' ? (
+        <Callout tone="neutral" icon={<Globe2 />} title="Choose a region">Pick at least one region above to get ideas for it.</Callout>
+      ) : ideas.error?.code === 'plus_required' ? (
+        <Callout tone="neutral" icon={<Clock />} title="Content ideas are on hold">Ideas come with an active Plus package.</Callout>
+      ) : ideas.error ? <ErrorState error={ideas.error} onRetry={ideas.reload} /> : !ideas.data ? <Spinner className="min-h-40" /> : (
         <div className="grid gap-4 md:grid-cols-2">
           {ideas.data.regions.flatMap((r) => r.ideas.map((i, n) => (
             <Card key={r.region + n} className="p-5">

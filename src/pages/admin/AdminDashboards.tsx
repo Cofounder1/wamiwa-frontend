@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Download, EyeOff, Megaphone, ShieldAlert, Trash2 } from 'lucide-react'
+import { AlertTriangle, Download, EyeOff, Lock, Megaphone, ShieldAlert, Trash2 } from 'lucide-react'
 import { api, API_URL, ApiError, auth, errMsg } from '@/api/client'
 import { useApi } from '@/api/hooks'
 import { compact, date, int, naira, usd } from '@/lib/format'
-import { TARGETS } from '@/lib/rules'
+import { NICHES, TARGETS } from '@/lib/rules'
 import { Badge, Button, Callout, Card, CardHeader, Field, KV, Modal, PageHeader, Segmented, Select, Stat, Tabs, Textarea, toast } from '@/components/ui/primitives'
+import { useSession } from '@/context/session'
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { BarList, TargetMeter } from '@/components/charts/Charts'
 import { RegionSelect } from '@/components/ui/RegionPicker'
@@ -28,13 +29,15 @@ interface Dashboard { range: { start: string; end: string }; metrics: Metrics; p
 
 const RANGES = { '7d': 7, '30d': 30, '90d': 90 } as const
 
-export function Filters({ range, setRange, role, setRole, region, setRegion, onExport }: {
-  range: keyof typeof RANGES; setRange: (r: keyof typeof RANGES) => void; role: string; setRole: (r: string) => void; region: string; setRegion: (r: string) => void; onExport?: () => void
+export function Filters({ range, setRange, role, setRole, niche, setNiche, region, setRegion, onExport }: {
+  range: keyof typeof RANGES; setRange: (r: keyof typeof RANGES) => void; role: string; setRole: (r: string) => void
+  niche?: string; setNiche?: (n: string) => void; region: string; setRegion: (r: string) => void; onExport?: () => void
 }) {
   return (
     <div className="mb-6 flex flex-wrap items-center gap-2">
       <Segmented size="sm" value={range} onChange={setRange} options={[{ value: '7d', label: '7 days' }, { value: '30d', label: '30 days' }, { value: '90d', label: '90 days' }]} />
       <Select className="!h-9 !w-40 text-[13px]" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All roles</option><option value="user">People</option><option value="company">Companies</option><option value="agent">Agents</option></Select>
+      {setNiche && <Select className="!h-9 !w-44 text-[13px]" value={niche ?? ''} onChange={(e) => setNiche(e.target.value)}><option value="">All niches</option>{NICHES.map((n) => <option key={n} value={n.toLowerCase()}>{n}</option>)}</Select>}
       <RegionSelect className="!h-9 !w-44 text-[13px]" value={region} onChange={setRegion} placeholder="All regions" />
       {onExport && <Button size="sm" variant="outline" className="ml-auto" icon={<Download className="size-3.5" />} onClick={onExport}>Export CSV</Button>}
     </div>
@@ -47,14 +50,17 @@ const delta = (cur: number, prev?: number) => (prev === undefined || prev === 0 
 
 export function AdminOverview() {
   const perms = usePerms()
+  const superA = useSession().role === 'super_admin'
   const [range, setRange] = useState<keyof typeof RANGES>('30d')
   const [role, setRole] = useState('')
+  const [niche, setNiche] = useState('')
   const [region, setRegion] = useState('')
   const [tab, setTab] = useState<'growth' | 'marketplace' | 'safety' | 'agents'>('growth')
   const start = new Date(Date.now() - RANGES[range] * 864e5).toISOString()
-  const query = { start, role: role || undefined, region: region || undefined, compare: true }
-  const res = useApi((s) => api.get<Dashboard>('/admin/dashboard', query, s), [range, role, region])
-  const health = useApi((s) => api.get<{ per_queue: Record<string, { waiting: number; past_target: number }> }>('/admin/queues/health', undefined, s), [])
+  const query = { start, role: role || undefined, niche: niche || undefined, region: region || undefined, compare: true }
+  const res = useApi((s) => api.get<Dashboard>('/admin/dashboard', query, s), [range, role, niche, region])
+  // Queue health is Super Admin only (AQ-03); other admins don't see the past-target banner.
+  const health = useApi(superA ? (s) => api.get<{ per_queue: Record<string, { waiting: number; past_target: number }> }>('/admin/queues/health', undefined, s) : null, [superA])
 
   const exportCsv = async () => {
     try {
@@ -90,7 +96,7 @@ export function AdminOverview() {
   return (
     <div>
       <PageHeader eyebrow="Platform" title="Overview" subtitle="Success metrics against their 6-month targets. Review targets after the first 60 days of data." />
-      <Filters range={range} setRange={setRange} role={role} setRole={setRole} region={region} setRegion={setRegion} onExport={exportCsv} />
+      <Filters range={range} setRange={setRange} role={role} setRole={setRole} niche={niche} setNiche={setNiche} region={region} setRegion={setRegion} onExport={exportCsv} />
       {late.length > 0 && <Callout className="mb-6" tone="warn" icon={<AlertTriangle />} title={`${late.reduce((n, [, v]) => n + v.past_target, 0)} queue ${late.length === 1 ? 'item' : 'items'} past target`} action={<Button size="sm" to="/admin/queues">Open queues</Button>}>{late.map(([q]) => cap(q)).join(', ')}</Callout>}
       {!m ? <Spinner /> : (
         <>
@@ -175,7 +181,9 @@ export function AdminOverview() {
 interface Health { per_queue: Record<string, { waiting: number; past_target: number; decided: number; average_decision_hours: number | null }>; per_admin: Record<string, { name?: string; decided: number; average_decision_hours: number | null; past_target?: number }>; generated_at: string }
 
 export function QueueHealth() {
-  const res = useApi((s) => api.get<Health>('/admin/queues/health', undefined, s), [])
+  const superA = useSession().role === 'super_admin'
+  const res = useApi(superA ? (s) => api.get<Health>('/admin/queues/health', undefined, s) : null, [superA])
+  if (!superA) return <Callout tone="neutral" icon={<Lock />} title="Super Admin only">Queue health is visible to Super Admins. Your queues are still available.</Callout>
   if (res.error) return <ErrorState error={res.error} onRetry={res.reload} />
   if (!res.data) return <Spinner />
   return (
@@ -206,14 +214,27 @@ export function QueueHealth() {
 /* ── WA-12 Wamiwa Agent monitoring ──────────────────────────────────────── */
 
 interface PromoOverview { period_days: number; plans_by_status: Record<string, number>; active_plans: Record<string, number>; activity: Record<string, number>; names_live: number; links_saved: number; links_under_review: number; waiting_for_review: number; revenue?: { monthly_recurring_usd: number; collected_in_period: number } }
-interface PromoRow { id: string; account_id: string; handle: string; kind: string; tier: string; status: string; category: string | null; renews_at: string }
-interface PromoDetail extends PromoRow { names: { id: string; name: string; status: string }[]; links: { id: string; url: string; label: string; under_review: boolean; review_reason: string | null; shared_by_agent: boolean }[]; results?: Record<string, number> }
+interface PromoRow { id: string; account_id: string; handle: string; kind: string; tier: string; status: string; category: string | null; renews_at: string | null }
+/** GET /admin/promotions/{id}: the owner's plan as they see it, who owns it, and 30 days of results. */
+interface PromoDetail {
+  plan: {
+    id: string; kind: string; tier: string; status: string; category: string | null; renews_at: string | null; cancel_at_period_end: boolean
+    names: { id: string; name: string; status: string; matches_in_plain_text: boolean }[]
+    links: { id: string; url: string; label: string; keywords: string[]; under_review: boolean; review_reason: string | null; shared_by_agent: boolean }[]
+  } | null
+  owner: { id: string; handle: string; status: string }
+  results: { totals: Record<string, number>; rates: Record<string, number> } | null
+}
+const PROMO_KINDS = ['business', 'seller', 'artist', 'label'] as const
+const PROMO_DAYS = { '7': 7, '30': 30, '90': 90 } as const
 
 export function WamiwaAgentAdmin() {
   const perms = usePerms()
   const [filter, setFilter] = useState<'all' | 'active' | 'review'>('all')
-  const overview = useApi((s) => api.get<PromoOverview>('/admin/promotions/overview', undefined, s), [])
-  const list = useApi((s) => api.page<PromoRow>('/admin/promotions', { status: filter === 'active' ? 'active' : undefined, under_review: filter === 'review' || undefined, limit: 50 }, s), [filter])
+  const [days, setDays] = useState<keyof typeof PROMO_DAYS>('30')
+  const [kind, setKind] = useState('')
+  const overview = useApi((s) => api.get<PromoOverview>('/admin/promotions/overview', { days: PROMO_DAYS[days] }, s), [days])
+  const list = useApi((s) => api.page<PromoRow>('/admin/promotions', { status: filter === 'active' ? 'active' : undefined, kind: kind || undefined, under_review: filter === 'review' || undefined, limit: 50 }, s), [filter, kind])
   const [open, setOpen] = useState<string | null>(null)
   const detail = useApi(open ? (s) => api.get<PromoDetail>(`/admin/promotions/${open}`, undefined, s) : null, [open])
   const [action, setAction] = useState<null | { kind: 'suspend' | 'restore' | 'remove-link'; label: string; linkId?: string }>(null)
@@ -230,9 +251,13 @@ export function WamiwaAgentAdmin() {
     } catch (e) { toast('Couldn’t do that', errMsg(e), 'danger') } finally { setBusy(false) }
   }
   const o = overview.data
+  const d = detail.data
+  const plan = d?.plan
+  const showMoney = !!perms.data?.view_revenue && !!o?.revenue
   return (
     <div>
-      <PageHeader eyebrow="Wamiwa Agent" title="Plans & links" subtitle="Everything the Wamiwa Agent does, open to every admin. Money figures need the revenue permission." />
+      <PageHeader eyebrow="Wamiwa Agent" title="Plans & links" subtitle="Everything the Wamiwa Agent does, open to every admin. Money figures need the revenue permission."
+        actions={<Segmented size="sm" value={days} onChange={setDays} options={[{ value: '7', label: '7 days' }, { value: '30', label: '30 days' }, { value: '90', label: '90 days' }]} />} />
       {overview.error ? <ErrorState error={overview.error} onRetry={overview.reload} /> : !o ? <Spinner className="min-h-32" /> : (
         <>
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
@@ -241,7 +266,14 @@ export function WamiwaAgentAdmin() {
             <Stat label="Links saved" value={o.links_saved} />
             <Stat label="Links under review" value={o.links_under_review} />
             <Stat label="Waiting for review" value={o.waiting_for_review} />
-            <Stat label="MRR" value={perms.data?.view_revenue && o.revenue ? usd(o.revenue.monthly_recurring_usd) : '—'} sub={perms.data?.view_revenue ? undefined : 'Needs revenue permission'} />
+            <Stat label="MRR" value={showMoney ? usd(o.revenue!.monthly_recurring_usd) : '—'} sub={perms.data?.view_revenue ? undefined : 'Needs revenue permission'} />
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+            <Card className="p-5">
+              <h3 className="mb-3 text-[15px] font-bold text-ink">Active plans by type and package</h3>
+              {Object.keys(o.active_plans).length ? <BarList rows={Object.entries(o.active_plans).map(([k, v]) => { const [pk, tier] = k.split(':'); return { label: `${cap(pk)} · ${cap(tier ?? '')}`, value: v } })} /> : <p className="text-[13px] text-ink-2">No active plans.</p>}
+            </Card>
+            {showMoney && <Stat label={`Collected in the last ${o.period_days} days`} value={naira(o.revenue!.collected_in_period)} sub="Plan payments, less refunds" />}
           </div>
           <div className="mt-4 grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
             {Object.entries(o.activity).map(([k, v]) => <Card flat key={k} className="p-4"><div className="text-[12px] text-ink-2">{cap(k)}</div><div className="text-[18px] font-extrabold text-ink num">{compact(v)}</div></Card>)}
@@ -249,11 +281,14 @@ export function WamiwaAgentAdmin() {
         </>
       )}
       <Card className="mt-6">
-        <CardHeader title="Plans" action={<Segmented size="sm" value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'active', label: 'Active' }, { value: 'review', label: 'Links under review' }]} />} />
+        <CardHeader title="Plans" action={<div className="flex flex-wrap items-center gap-2">
+          <Select className="!h-9 !w-36 text-[13px]" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">All kinds</option>{PROMO_KINDS.map((k) => <option key={k} value={k}>{cap(k)}</option>)}</Select>
+          <Segmented size="sm" value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'active', label: 'Active' }, { value: 'review', label: 'Links under review' }]} />
+        </div>} />
         <div className="mt-3 divide-y divide-line">
           {(list.data?.data ?? []).map((p) => (
             <button key={p.id} onClick={() => setOpen(p.id)} className="flex w-full items-center gap-4 px-5 py-3.5 text-left hover:bg-surface-2">
-              <div className="min-w-0 flex-1"><div className="font-bold text-ink">@{p.handle}</div><div className="text-[12.5px] text-ink-2">{cap(p.kind)} · {p.tier}{p.category ? ` · ${cap(p.category)}` : ''} · renews {date(p.renews_at)}</div></div>
+              <div className="min-w-0 flex-1"><div className="font-bold text-ink">@{p.handle}</div><div className="text-[12.5px] text-ink-2">{cap(p.kind)} · {p.tier}{p.category ? ` · ${cap(p.category)}` : ''}{p.renews_at ? ` · renews ${date(p.renews_at)}` : ''}</div></div>
               <Badge tone={p.status === 'active' ? 'success' : p.status === 'suspended' ? 'danger' : 'warn'}>{cap(p.status)}</Badge>
             </button>
           ))}
@@ -261,15 +296,17 @@ export function WamiwaAgentAdmin() {
         </div>
       </Card>
 
-      <Modal open={!!open} onClose={() => setOpen(null)} size="lg" title={detail.data ? `@${detail.data.handle}` : 'Plan'} subtitle={detail.data ? `${cap(detail.data.kind)} · ${detail.data.tier} · ${detail.data.status}` : undefined}
-        footer={detail.data && <><Button variant="ghost" to="/admin/audit">Audit log</Button>{detail.data.status === 'suspended' ? <Button onClick={() => setAction({ kind: 'restore', label: 'Restore plan' })}>Restore</Button> : <Button variant="danger" disabled={!perms.data?.suspend} onClick={() => setAction({ kind: 'suspend', label: 'Suspend plan' })}>Suspend plan</Button>}</>}>
-        {!detail.data ? <Spinner className="min-h-32" /> : (
+      <Modal open={!!open} onClose={() => setOpen(null)} size="lg" title={d ? `@${d.owner.handle}` : 'Plan'} subtitle={plan ? `${cap(plan.kind)} · ${plan.tier} · ${cap(plan.status)}${plan.renews_at ? ` · renews ${date(plan.renews_at)}` : ''}${d!.owner.status !== 'active' ? ` · account ${d!.owner.status}` : ''}` : undefined}
+        footer={plan && <><Button variant="ghost" to={`/admin/audit?target=${plan.id}`}>Audit log</Button>{plan.status === 'suspended' ? <Button disabled={!perms.data?.suspend} onClick={() => setAction({ kind: 'restore', label: 'Restore plan' })}>Restore</Button> : <Button variant="danger" disabled={!perms.data?.suspend} onClick={() => setAction({ kind: 'suspend', label: 'Suspend plan' })}>Suspend plan</Button>}</>}>
+        {detail.error ? <ErrorState compact error={detail.error} onRetry={detail.reload} /> : !d ? <Spinner className="min-h-32" /> : !plan ? <p className="text-[13.5px] text-ink-2">This plan no longer exists.</p> : (
           <>
+            {d.results && <div className="mb-5 grid gap-3 sm:grid-cols-4">{Object.entries(d.results.totals).slice(0, 8).map(([k, v]) => <Card flat key={k} className="p-3"><div className="text-[11.5px] text-ink-2">{cap(k)} · 30d</div><div className="text-[16px] font-extrabold text-ink num">{compact(v)}</div></Card>)}</div>}
             <div className="mb-2 text-[13px] font-bold text-ink">Names</div>
-            <div className="mb-5 flex flex-wrap gap-1.5">{detail.data.names.map((n) => <Badge key={n.id} tone={n.status === 'approved' ? 'success' : 'warn'}>{n.name} · {n.status.replace(/_/g, ' ')}</Badge>)}</div>
+            <div className="mb-5 flex flex-wrap gap-1.5">{plan.names.length ? plan.names.map((n) => <Badge key={n.id} tone={n.status === 'approved' ? 'success' : 'warn'}>{n.name} · {n.status.replace(/_/g, ' ')}</Badge>) : <span className="text-[13px] text-ink-2">No names.</span>}</div>
             <div className="mb-2 text-[13px] font-bold text-ink">Links</div>
             <ul className="space-y-2">
-              {detail.data.links.map((l) => (
+              {plan.links.length === 0 && <li className="text-[13px] text-ink-2">No links.</li>}
+              {plan.links.map((l) => (
                 <li key={l.id} className="flex items-center gap-3 rounded-2xl border border-line p-3">
                   <div className="min-w-0 flex-1"><div className="flex items-center gap-2 text-[13.5px] font-bold text-ink">{l.label}{l.under_review && <Badge tone="danger" icon={<ShieldAlert className="size-3" />}>{l.review_reason ?? 'Under review'}</Badge>}</div><div className="truncate font-mono text-[12px] text-ink-2">{l.url}</div></div>
                   <Button size="xs" variant="ghost" className="text-danger" icon={<Trash2 className="size-3" />} onClick={() => setAction({ kind: 'remove-link', label: `Remove ${l.label}`, linkId: l.id })}>Remove</Button>

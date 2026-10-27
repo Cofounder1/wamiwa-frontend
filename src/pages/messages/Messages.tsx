@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, Ban, CheckCheck, FileText, Flag, Image as ImageIcon, Loader2, Paperclip, Send, ShieldCheck, Sparkles } from 'lucide-react'
 import { acc } from '@/data/mock'
-import { api, ApiError, mediaUrl } from '@/api/client'
+import { api, ApiError, errMsg, mediaUrl } from '@/api/client'
 import { fromAuthor } from '@/api/adapt'
 import { useApi, usePaged } from '@/api/hooks'
-import type { ConversationDto, MessageDto, ProfileDto } from '@/api/types'
+import type { ConversationDto, MessageDto, ProfileDto, ThreadDto as ThreadApiDto } from '@/api/types'
 import { ago } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import { useSession } from '@/context/session'
@@ -18,7 +18,8 @@ import { SummarizeChat } from '@/components/social/SummarizeChat'
 
 type ChatTab = 'primary' | 'requests' | 'business'
 interface Attachment { kind: 'image' | 'video' | 'voice' | 'document'; ref: string; size_bytes: number; name?: string }
-interface ThreadDto { conversation: { id: string; type: string; accepted: boolean }; messages: (MessageDto & { attachments: Attachment[] })[]; typing: string[] }
+type Msg = MessageDto & { attachments: Attachment[] }
+type ThreadDto = Omit<ThreadApiDto, 'messages'> & { messages: Msg[] }
 
 export default function Messages() {
   const { id } = useParams()
@@ -43,18 +44,20 @@ export default function Messages() {
         <ul className="scroll-thin flex-1 overflow-y-auto p-2">
           {list.error ? <ErrorState compact error={list.error} onRetry={list.reload} /> : list.loading ? <RowSkeleton /> : list.items.map((c) => {
             const other = c.with[0] ? acc(c.with[0].id) : undefined
+            const unread = c.id === id ? 0 : c.unread ?? 0  // the open thread is being read
             return (
               <li key={c.id}>
                 <Link to={`/app/messages/${c.id}`} className={cn('flex items-center gap-3 rounded-2xl px-3 py-3 transition', c.id === id ? 'bg-brand-soft' : 'hover:bg-wash')}>
                   {other && <Avatar src={other.avatar} name={other.name} kind={other.kind} />}
                   <div className="min-w-0 flex-1 leading-tight">
                     <div className="flex items-center gap-1">
-                      <span className={cn('truncate text-[14px] text-ink', c.unread ? 'font-extrabold' : 'font-semibold')}>{other?.name ?? 'Conversation'}</span>
-                      <span className="ml-auto shrink-0 pl-2 text-[11.5px] text-ink-3">{c.last_message_at ? ago(c.last_message_at) : ''}</span>
+                      <span className={cn('truncate text-[14px] text-ink', unread ? 'font-extrabold' : 'font-semibold')}>{other?.name ?? 'Conversation'}</span>
+                      <span className={cn('ml-auto shrink-0 pl-2 text-[11.5px]', unread ? 'font-bold text-brand' : 'text-ink-3')}>{c.last_message_at ? ago(c.last_message_at) : ''}</span>
                     </div>
                     <div className="mt-1 flex items-center gap-2">
                       {c.type !== 'direct' && <Badge tone={c.type === 'order' ? 'agent' : 'neutral'} className="!text-[10px] !leading-4">{c.type === 'order' ? 'Order' : c.type === 'contract' ? 'Contract' : 'Business'}</Badge>}
-                      <span className="truncate text-[13px] text-ink-2">{c.last_message ?? '@' + (other?.handle ?? '')}</span>
+                      <span className={cn('min-w-0 flex-1 truncate text-[13px]', unread ? 'font-semibold text-ink' : 'text-ink-2')}>{c.last_message || (c.last_message === '' ? 'Attachment' : '@' + (other?.handle ?? ''))}</span>
+                      {unread > 0 && <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-brand px-1.5 text-[11px] font-bold text-on-brand num" aria-label={`${unread} unread`}>{unread > 99 ? '99+' : unread}</span>}
                     </div>
                   </div>
                 </Link>
@@ -81,27 +84,53 @@ export default function Messages() {
   )
 }
 
-function Thread({ conversationId, meta, onBack, onChanged }: { conversationId: string; meta?: ConversationDto; onBack: () => void; onChanged: () => void }) {
+function Thread({ conversationId, meta: listed, onBack, onChanged }: { conversationId: string; meta?: ConversationDto; onBack: () => void; onChanged: () => void }) {
   const { me, blocked, toggleBlock } = useSession()
   const res = useApi((s) => api.get<ThreadDto>(`/conversations/${conversationId}/messages`, { limit: 50 }, s), [conversationId])
-  const [sent, setSent] = useState<(MessageDto & { attachments: Attachment[] })[]>([])
+  const [history, setHistory] = useState<Map<string, Msg>>(new Map())
+  /** Cursor for the next older page: undefined until the first page arrives, null once there's nothing older. */
+  const [earlier, setEarlier] = useState<string | null>()
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [report, setReport] = useState(false)
+  const [reportMsg, setReportMsg] = useState<string | null>(null)
   const [summarize, setSummarize] = useState(false)
   const end = useRef<HTMLDivElement>(null)
-  const other = meta?.with[0] ? acc(meta.with[0].id) : undefined
+  // The thread may not be in the loaded list (another tab, or further down): the API's own header data fills in.
+  const conv = res.data?.conversation
+  const meta = listed ?? conv
+  const withList = listed?.with ?? conv?.with ?? []
+  withList.forEach(fromAuthor)
+  const other = withList[0] ? acc(withList[0].id) : undefined
 
-  // Poll for new messages and typing while the thread is open.
+  // Poll for new messages and typing while the thread is open. Every page seen is kept, so loading earlier
+  // messages and polling never leave a gap.
   useEffect(() => { const t = setInterval(() => { res.reload() }, 5000); return () => clearInterval(t) }, [res.reload]) // eslint-disable-line react-hooks/exhaustive-deps
-  const serverMsgs = res.data?.messages ?? []
-  const messages = [...serverMsgs, ...sent.filter((m) => !serverMsgs.some((s) => s.id === m.id))].sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
-  useEffect(() => { end.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length])
+  useEffect(() => {
+    const d = res.data
+    if (!d) return
+    setHistory((h) => { const n = new Map(h); d.messages.forEach((m) => n.set(m.id, m)); return n })
+    setEarlier((c) => (c === undefined ? d.next_cursor ?? null : c))
+  }, [res.data])
+  const messages = [...history.values()].sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
+  const lastId = messages[messages.length - 1]?.id
+  useEffect(() => { end.current?.scrollIntoView({ behavior: 'smooth' }) }, [lastId])
 
-  const isRequest = res.data ? !res.data.conversation.accepted : meta ? !meta.accepted : false
+  const loadEarlier = async () => {
+    if (!earlier || loadingEarlier) return
+    setLoadingEarlier(true)
+    try {
+      const page = await api.get<ThreadDto>(`/conversations/${conversationId}/messages`, { limit: 50, cursor: earlier })
+      setHistory((h) => { const n = new Map(h); page.messages.forEach((m) => n.set(m.id, m)); return n })
+      setEarlier(page.next_cursor ?? null)
+    } catch (e) { toast('Couldn’t load earlier messages', errMsg(e), 'danger') } finally { setLoadingEarlier(false) }
+  }
+
+  const isRequest = conv ? !conv.accepted : listed ? !listed.accepted : false
   const typing = (res.data?.typing ?? []).filter((t) => t !== me.id)
   const isBlocked = other ? blocked.has(other.id) : false
   const send = async (body: string, attachments: Attachment[]) => {
-    const m = await api.post<MessageDto & { attachments: Attachment[] }>(`/conversations/${conversationId}/messages`, { body, attachments })
-    setSent((x) => [...x, m])
+    const m = await api.post<Msg>(`/conversations/${conversationId}/messages`, { body, attachments })
+    setHistory((h) => new Map(h).set(m.id, m))
   }
   const respond = async (action: 'accept' | 'delete') => {
     try { await api.post(`/conversations/${conversationId}/request/${action}`); toast(action === 'accept' ? 'Request accepted' : 'Request deleted'); onChanged(); if (action === 'delete') onBack(); else res.reload() } catch (e) { toast('Couldn’t update', (e as ApiError).message, 'danger') }
@@ -118,7 +147,7 @@ function Thread({ conversationId, meta, onBack, onChanged }: { conversationId: s
         </div>
         {meta?.contract_id && <Button size="sm" variant="outline" to={meta.type === 'order' ? `/app/orders/${meta.contract_id}` : `/app/contracts/${meta.contract_id}`}>View {meta.type === 'order' ? 'order' : 'contract'}</Button>}
         <Menu items={[
-          { label: 'Summarize with an agent', icon: <Sparkles />, hidden: meta?.type === 'order', onClick: () => setSummarize(true) },
+          { label: 'Summarize with an agent', icon: <Sparkles />, hidden: !meta || meta.type === 'order' || meta.type === 'contract' || meta.summarizable === false, onClick: () => setSummarize(true) },
           { label: 'Report chat', icon: <Flag />, onClick: () => setReport(true) },
           { label: isBlocked ? 'Unblock' : 'Block', icon: <Ban />, danger: !isBlocked, hidden: !other, onClick: () => { toggleBlock(other!.id, !isBlocked); toast(isBlocked ? 'Unblocked' : 'Blocked', isBlocked ? undefined : 'Active contracts continue; their messages move to the contract thread.') } },
         ]} />
@@ -128,9 +157,14 @@ function Thread({ conversationId, meta, onBack, onChanged }: { conversationId: s
         {meta?.type === 'business' && other?.kind === 'company' && (
           <Callout tone="neutral" icon={<ShieldCheck />} className="mx-auto max-w-md">Business chat with a company. Keep payments and contact details on Wamiwa so you’re covered by escrow and disputes.</Callout>
         )}
-        {res.error && <ErrorState compact error={res.error} onRetry={res.reload} />}
+        {res.error && !res.data && <ErrorState compact error={res.error} onRetry={res.reload} />}
         {!res.data && !res.error && <div className="grid place-items-center py-10 text-ink-3"><Loader2 className="size-5 animate-spin" /></div>}
-        {messages.map((m) => <Bubble key={m.id} m={m} mine={m.sender_id === me.id} />)}
+        {earlier && (
+          <div className="text-center">
+            <Button size="xs" variant="outline" loading={loadingEarlier} onClick={loadEarlier}>Load earlier messages</Button>
+          </div>
+        )}
+        {messages.map((m) => <Bubble key={m.id} m={m} mine={m.sender_id === me.id} onReport={() => setReportMsg(m.id)} />)}
         {typing.length > 0 && other && (
           <div className="flex items-center gap-2">
             <Avatar src={other.avatar} name={other.name} kind={other.kind} size="xs" />
@@ -153,7 +187,8 @@ function Thread({ conversationId, meta, onBack, onChanged }: { conversationId: s
         <ChatComposer conversationId={conversationId} onSend={send} />
       )}
       <ReportModal open={report} onClose={() => setReport(false)} target="chat" targetType="conversation" targetId={conversationId} />
-      <SummarizeChat open={summarize} onClose={() => setSummarize(false)} conversationId={conversationId} />
+      <ReportModal open={!!reportMsg} onClose={() => setReportMsg(null)} target="message" targetType="message" targetId={reportMsg ?? ''} />
+      <SummarizeChat open={summarize} onClose={() => setSummarize(false)} conversationId={conversationId} messageCount={res.data ? messages.length : undefined} />
     </section>
   )
 }
@@ -183,6 +218,7 @@ function NewThread({ recipientId, onBack, onCreated }: { recipientId: string; on
 const SENSITIVE = /(\+?\d[\d\s-]{8,}\d)|(\S+@\S+\.\S+)|(account (number|no)|acct|iban|bank details)/i
 
 function ChatComposer({ conversationId, onSend }: { conversationId?: string; onSend: (body: string, attachments: Attachment[]) => Promise<void> }) {
+  const nav = useNavigate()
   const [text, setText] = useState('')
   const [files, setFiles] = useState<Attachment[]>([])
   const [busy, setBusy] = useState(false)
@@ -219,7 +255,12 @@ function ChatComposer({ conversationId, onSend }: { conversationId?: string; onS
       setFiles([])
       setWarning(undefined)
     } catch (e) {
-      toast('Message not sent', (e as ApiError).message, 'danger')
+      // MS-03: a block doesn't end a contract; its messages go to the contract thread instead.
+      const thread = e instanceof ApiError && e.code === 'blocked' ? e.details.contract_thread_id : undefined
+      if (typeof thread === 'string') {
+        toast('Message not sent', 'You can’t message this account here. Continue in your contract thread.', 'warn')
+        nav(`/app/messages/${thread}`)
+      } else toast('Message not sent', errMsg(e), 'danger')
     } finally {
       setBusy(false)
     }
@@ -241,7 +282,7 @@ function ChatComposer({ conversationId, onSend }: { conversationId?: string; onS
         <textarea
           rows={1}
           value={text}
-          maxLength={4000}
+          maxLength={5000}
           onChange={(e) => onType(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit() } }}
           placeholder="Write a message…"
@@ -253,10 +294,10 @@ function ChatComposer({ conversationId, onSend }: { conversationId?: string; onS
   )
 }
 
-function Bubble({ m, mine }: { m: MessageDto & { attachments: Attachment[] }; mine: boolean }) {
+function Bubble({ m, mine, onReport }: { m: Msg; mine: boolean; onReport: () => void }) {
   return (
     <>
-      <div className={cn('flex', mine ? 'justify-end' : 'justify-start')}>
+      <div className={cn('group flex items-center gap-1', mine ? 'justify-end' : 'justify-start')}>
         <div className={cn('max-w-[78%] rounded-[20px] px-4 py-2.5 text-[14px] leading-relaxed', mine ? 'rounded-br-md bg-brand text-on-brand' : 'rounded-bl-md bg-surface text-ink ring-1 ring-line')}>
           {m.attachments?.map((a) => a.kind === 'image'
             ? <img key={a.ref} src={mediaUrl(a.ref)} alt="" className="mb-2 max-h-64 rounded-xl object-cover" />
@@ -266,6 +307,11 @@ function Bubble({ m, mine }: { m: MessageDto & { attachments: Attachment[] }; mi
             {ago(m.created_at)}{mine && m.read_at && <CheckCheck className="size-3.5" aria-label="Read" />}
           </div>
         </div>
+        {!mine && (
+          <button onClick={onReport} aria-label="Report message" title="Report message" className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 transition group-hover:opacity-100 hover:bg-wash hover:text-danger focus:opacity-100">
+            <Flag className="size-3.5" />
+          </button>
+        )}
       </div>
       {m.warning && (
         <div className="mx-auto flex max-w-md items-start gap-2 rounded-2xl bg-warn-soft px-4 py-2.5 text-[12.5px] text-ink">

@@ -12,11 +12,11 @@ import { useSession } from '@/context/session'
 import { compact, naira, usd } from '@/lib/format'
 import { NICHES } from '@/lib/rules'
 import { cn } from '@/lib/cn'
-import { Avatar, Badge, Button, Callout, Card, CardHeader, Checkbox, Empty, Field, KV, PageHeader, Progress, Segmented, Select, Stat, Textarea, toast } from '@/components/ui/primitives'
+import { Avatar, Badge, Button, Callout, Card, CardHeader, Checkbox, Empty, Field, KV, Modal, PageHeader, Progress, Segmented, Select, Stat, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, LoadMore, Spinner } from '@/components/ui/states'
 import { SendOfferModal } from './SendOffer'
 import type { VideoDto } from '@/pages/earn/VideoApproval'
-import { pay } from '@/components/payments/PaymentSheet'
+import { pay, REFUND_NOTE } from '@/components/payments/PaymentSheet'
 import { isCancelled } from '@/api/payments'
 
 const cap = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
@@ -99,6 +99,14 @@ export function InfluencerBrowser() {
 /* ── LK-04 Script composer + pay ────────────────────────────────────────── */
 
 interface VideoPrices { pay_per_video_cents: number; included_seconds: number; included: { draft_previews: number; final_renders: number }; extra_minute_cents: number }
+/** POST /contracts/quote for a likeness hire: `pay_now` is the one amount the checkout charges (likeness + production). */
+interface LikenessQuote {
+  usd_cents: { price: number; fee: number; net: number; fee_pct: number }
+  production_usd_cents: number
+  pay_now: { usd_cents: number; local: number; currency: string }
+}
+const likenessQuote = (price_cents: number, video_seconds: number, use_plan: boolean, signal?: AbortSignal) =>
+  api.call<LikenessQuote>('POST', '/contracts/quote', { body: { type: 'likeness', price_cents, video_seconds, use_plan }, signal })
 
 export function ScriptComposer() {
   const { handle = '' } = useParams()
@@ -108,7 +116,8 @@ export function ScriptComposer() {
     return api.get<LikenessListing>(`/likeness/influencers/${profile.id}`, undefined, s)
   }, [handle])
   const prices = useApi((s) => api.get<VideoPrices>('/video-plans/prices', undefined, s), [])
-  const plan = useApi((s) => api.get<{ active: boolean; videos_left: number }>('/video-plans', undefined, s), [])
+  const plan = useApi((s) => api.get<{ active: boolean; videos_left: number; rollover_left: number }>('/video-plans', undefined, s), [])
+  const { me } = useSession()
   const [voice, setVoice] = useState(false)
   const [excl, setExcl] = useState(false)
   const [mustPost, setMustPost] = useState(false)
@@ -117,31 +126,40 @@ export function ScriptComposer() {
   const [script, setScript] = useState('[Scene: Rooftop, golden hour]\n\nCREATOR: …\n\nCREATOR: Tap the link and find your look.')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  // A plan can only be used while it's active and still has videos (this month's or rolled over).
+  const planVideos = plan.data?.active ? plan.data.videos_left + plan.data.rollover_left : 0
+  const onPlan = planVideos > 0 && usePlan
+  const a0 = res.data
+  const price = a0 ? (voice && a0.price_image_voice_cents ? a0.price_image_voice_cents : a0.price_image_cents)
+    + (excl && a0.exclusivity_price_cents ? a0.exclusivity_price_cents - a0.price_image_cents : 0) : 0
+  // The backend's own figure for what this hire costs today; the payment is for exactly `pay_now`.
+  const quote = useApi(price > 0 ? (s) => likenessQuote(price, seconds, onPlan, s) : null, [price, seconds, onPlan])
   if (res.error) return res.error.status === 404 ? <Empty title="No likeness page">This creator hasn’t set up Hire My Likeness.</Empty> : <ErrorState error={res.error} onRetry={res.reload} />
   if (!res.data || !prices.data) return <Spinner />
   const a = res.data
   const pr = prices.data
-  // As the backend prices it: image (or image + voice), and exclusivity adds its premium over image-only.
-  const price = (voice && a.price_image_voice_cents ? a.price_image_voice_cents : a.price_image_cents)
-    + (excl && a.exclusivity_price_cents ? a.exclusivity_price_cents - a.price_image_cents : 0)
-  const extraMinutes = Math.max(0, Math.ceil((seconds - pr.included_seconds) / 60))
-  const onPlan = !!plan.data?.active && usePlan
-  // As the backend charges it (LK-10): a plan video covers the first minute; extra minutes are always paid.
-  const production = (onPlan ? 0 : pr.pay_per_video_cents) + extraMinutes * pr.extra_minute_cents
-  // One payment covers both: the backend keeps the likeness price in escrow and records the rest as production.
-  const total = price + production
+  // Image (or image + voice), and exclusivity adds its premium over image-only — as the backend prices it.
+  // A plan video covers the first minute; extra minutes are always paid (LK-10). One payment covers both.
+  const q = quote.data && !quote.loading && quote.data.usd_cents.price === price ? quote.data : undefined
+  const unverified = me.verification !== 'company'
 
   const send = async () => {
     setBusy(true); setError(undefined)
+    let paid = false
     try {
-      const payment_method = await pay(total, `Likeness hire · ${a.name} (likeness held in escrow, plus video production)`)
+      const fresh = await likenessQuote(price, seconds, onPlan)
+      const payment_method = await pay(fresh.pay_now.usd_cents, `Likeness hire · ${a.name} (likeness held in escrow, plus video production)`)
+      paid = true
       const c = await api.post<ContractDto>('/likeness/contracts', {
         influencer_id: a.account_id, script, with_voice: voice, exclusivity: excl, influencer_must_post: mustPost, video_seconds: seconds,
         use_plan: onPlan, no_ai_replies: false, payment_method,
       })
       toast('Script paid & sent', c.status === 'admin_review' ? 'It was flagged by screening, so an admin reviews it first (about 24h).' : `${a.name.split(' ')[0]} has 7 days to respond.`)
       nav(`/app/contracts/${c.id}`)
-    } catch (e) { if (!isCancelled(e)) setError(errMsg(e)) } finally { setBusy(false) }
+    } catch (e) {
+      if (!isCancelled(e)) setError(paid ? `${errMsg(e)} ${REFUND_NOTE}` : errMsg(e))
+      if (paid) plan.reload()
+    } finally { setBusy(false) }
   }
   return (
     <div>
@@ -165,10 +183,18 @@ export function ScriptComposer() {
               {a.voice_available && a.price_image_voice_cents && <Checkbox checked={voice} onChange={setVoice}>Use voice too ({usd(a.price_image_voice_cents / 100)})</Checkbox>}
               {a.exclusivity_price_cents && <Checkbox checked={excl} onChange={setExcl}>Category exclusivity ({usd(a.exclusivity_price_cents / 100)})</Checkbox>}
               <Checkbox checked={mustPost} onChange={setMustPost}>Ask the creator to post it on their account too</Checkbox>
-              {plan.data?.active && <Checkbox checked={usePlan} onChange={setUsePlan}>Use my video plan ({plan.data.videos_left} left)</Checkbox>}
+              {planVideos > 0 && <Checkbox checked={usePlan} onChange={setUsePlan}>Use my video plan ({planVideos} left)</Checkbox>}
             </div>
-            <KV className="mt-4" rows={[['Likeness (to escrow)', usd(price / 100)], ['Video production', production ? `${usd(production / 100)}${onPlan ? ' (extra length)' : ''}` : 'From plan'], ['Includes', `${pr.included.draft_previews} drafts + ${pr.included.final_renders} finals`], ['Total today', <span key="t" className="text-[16px]">{usd(total / 100)}</span>]]} />
-            <Button className="mt-4 w-full" loading={busy} disabled={script.trim().length < 20} icon={<Lock className="size-4" />} onClick={send}>Pay & send script</Button>
+            <KV className="mt-4" rows={[
+              ['Likeness (to escrow)', usd(price / 100)],
+              ['Video production', !q ? '—' : q.production_usd_cents ? `${usd(q.production_usd_cents / 100)}${onPlan ? ' (extra length)' : ''}` : 'From plan'],
+              ['Includes', `${pr.included.draft_previews} drafts + ${pr.included.final_renders} finals`],
+              ['Total today', <span key="t" className="text-[16px]">{q ? usd(q.pay_now.usd_cents / 100) : '—'}</span>],
+            ]} />
+            {quote.error && <Callout className="mt-3 !p-3" tone="danger">{errMsg(quote.error)}</Callout>}
+            {unverified && <Callout className="mt-3 !p-3" tone="danger">Verify your business before you hire a likeness.</Callout>}
+            {a.paused && <Callout className="mt-3 !p-3" tone="warn">This likeness isn’t open to new hires right now.</Callout>}
+            <Button className="mt-4 w-full" loading={busy} disabled={script.trim().length < 20 || !q || unverified || a.paused} icon={<Lock className="size-4" />} onClick={send}>Pay & send script</Button>
             <p className="mt-2 text-center text-[11.5px] text-ink-3">The creator receives 80% of the likeness price.</p>
           </Card>
           <Callout tone="neutral">The creator can accept, reject, or request up to 3 rounds of changes. If they don’t answer in 7 days, you’re refunded in full.</Callout>
@@ -186,7 +212,9 @@ export function VideoStudio() {
   const { id = '' } = useParams()
   const res = useApi((s) => api.get<VideoBundle>(`/likeness/contracts/${id}/videos`, undefined, s), [id])
   const contract = useApi((s) => api.get<ContractDto>(`/contracts/${id}`, undefined, s), [id])
-  const [busy, setBusy] = useState<null | 'draft' | 'final' | 'post'>(null)
+  const [busy, setBusy] = useState<null | 'draft' | 'final' | 'post' | 'defect'>(null)
+  const [defectFor, setDefectFor] = useState<VideoDto | null>(null)
+  const [defectNote, setDefectNote] = useState('')
   useParties([contract.data?.earner_id])
   if (res.error) return <ErrorState error={res.error} onRetry={res.reload} />
   if (!res.data || !contract.data) return <Spinner />
@@ -206,6 +234,19 @@ export function VideoStudio() {
       toast(kind === 'draft' ? 'Draft preview ready' : 'Final render sent for approval', kind === 'final' ? 'The creator has 72 hours to approve; then it auto-approves.' : undefined)
       res.reload()
     } catch (e) { if (!isCancelled(e)) toast('Couldn’t render', errMsg(e), 'danger') } finally { setBusy(null) }
+  }
+  // Free fix guarantee: a ready final render with a technical defect is re-rendered free.
+  const defective = [...videos].filter((v) => v.kind === 'final' && v.status === 'ready' && !v.rejection_reason).sort((x, y) => y.version - x.version)[0]
+  const reportDefect = async () => {
+    if (!defectFor) return
+    setBusy('defect')
+    try {
+      await api.post(`/videos/${defectFor.id}/defect`, { note: defectNote.trim() })
+      toast('Defect reported', 'You get a free re-render. It doesn’t count against your final renders.')
+      setDefectFor(null); setDefectNote(''); res.reload()
+    } catch (e) {
+      toast('Couldn’t report it', e instanceof ApiError && e.code === 'defect_claim_limit' ? 'You’ve used the free fixes on this contract. Contact support to review further defects.' : errMsg(e), 'danger')
+    } finally { setBusy(null) }
   }
   const post = async () => {
     setBusy('post')
@@ -238,9 +279,15 @@ export function VideoStudio() {
           <Button className="w-full" icon={<Sparkles className="size-4" />} disabled={(counter.finals_left <= 0 && !counter.free_rerenders) || !!busy || !!pending} loading={busy === 'final'} onClick={() => gen('final')}>{pending ? 'Waiting for the creator' : 'Request final render'}</Button>
           {counter.finals_left <= 0 && !counter.free_rerenders && !approvedFinal && <Button className="w-full" variant="secondary" loading={busy === 'final'} onClick={() => gen('final', true)}>Buy an extra final render</Button>}
           {approvedFinal && <Button className="w-full" variant="dark" icon={<Send className="size-4" />} loading={busy === 'post'} onClick={post}>Post the approved video</Button>}
+          {defective && <Button className="w-full" variant="ghost" icon={<AlertTriangle className="size-4" />} disabled={!!busy} onClick={() => setDefectFor(defective)}>Report a technical defect</Button>}
           <Callout tone="neutral" className="!text-[12.5px]">Re-renders for technical defects or not matching the signed script are free. Re-renders because you changed the script are charged.</Callout>
         </div>
       </div>
+      <Modal open={!!defectFor} onClose={() => setDefectFor(null)} size="sm" title="Report a technical defect" subtitle={defectFor ? `Final render ${defectFor.version}` : undefined}
+        footer={<><Button variant="ghost" onClick={() => setDefectFor(null)}>Cancel</Button><Button loading={busy === 'defect'} onClick={reportDefect}>Report & get a free re-render</Button></>}>
+        <p className="mb-3 text-[13.5px] text-ink-2">Lip-sync off, a distorted face, broken audio: technical defects are fixed free under the free fix guarantee. Script changes aren’t defects and are charged.</p>
+        <Textarea value={defectNote} maxLength={2000} onChange={(e) => setDefectNote(e.target.value)} placeholder="What’s wrong, and where in the video? (optional)" />
+      </Modal>
     </div>
   )
 }

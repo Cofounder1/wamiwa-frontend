@@ -26,7 +26,7 @@ export function ReportModal({ open, onClose, target, targetType, targetId }: {
       onClose()
       setReason(null)
       setNote('')
-      toast('Report sent', REPORT_REASON_VALUE[reason!] ? 'It’s hidden while our investigation team looks into it. You’ll hear back on the outcome.' : 'Our team reviews reports within 24 hours. You’ll hear back on the outcome.')
+      toast('Report sent', REPORT_REASON_VALUE[reason!] ? 'Our investigation team looks into it. It’s hidden right away if your ID is verified and you have no false reports, or once a second person reports it. You’ll hear back on the outcome.' : 'Our team reviews reports within 24 hours. You’ll hear back on the outcome.')
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Couldn’t send the report.')
     } finally {

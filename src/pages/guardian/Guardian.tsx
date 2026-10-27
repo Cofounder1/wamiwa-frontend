@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertOctagon, Ban, Building2, Check, CheckCircle2, Eye, FileText, HeartHandshake, Lock, PhoneCall, PhoneMissed, Search, ShieldCheck, Snowflake, Upload, X,
 } from 'lucide-react'
-import { api, mediaUrl, errMsg } from '@/api/client'
+import { api, ApiError, mediaUrl, errMsg } from '@/api/client'
 import { partyName, statusText } from '@/api/adapt'
 import { useApi } from '@/api/hooks'
-import type { ContractDto, ConversationDto, EarningsDto, SearchHitDto } from '@/api/types'
+import type { AuthorDto, ContractDto, EarningsDto, MessageDto, SearchHitDto } from '@/api/types'
 import { useSession } from '@/context/session'
 import { date, dateTime, naira, searchTerm } from '@/lib/format'
 import { MINOR_BLOCKED } from '@/lib/rules'
@@ -43,6 +43,19 @@ function MinorGate({ children }: { children: (m: MinorDto) => React.ReactNode })
 
 const first = (name: string) => name.split(' ')[0]
 
+/** Confirmation calls go to the guardian's verified phone; without one the backend answers `phone_required`. */
+function usePhoneGuard() {
+  const nav = useNavigate()
+  return (e: unknown) => {
+    if (e instanceof ApiError && e.code === 'phone_required') {
+      toast('Verify your phone number first', 'The confirmation call goes to your verified number. Add it in Settings.', 'warn')
+      nav('/app/settings?tab=privacy')
+      return true
+    }
+    return false
+  }
+}
+
 /* ── Overview ───────────────────────────────────────────────────────────── */
 
 export function GuardianOverview() {
@@ -77,7 +90,7 @@ function Overview({ m }: { m: MinorDto }) {
         <div className="flex flex-wrap items-center gap-5 p-6">
           <Avatar name={m.name} size="xl" />
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2"><h2 className="text-[22px] font-extrabold text-ink">{m.name}</h2><Badge tone="teal">Linked</Badge>{frozen && <Badge tone="danger" icon={<Snowflake className="size-3" />}>Frozen</Badge>}</div>
+            <div className="flex flex-wrap items-center gap-2"><h2 className="text-[22px] font-extrabold text-ink">{m.name}</h2>{m.link_status === 'pending_verification' ? <Badge tone="warn">Waiting on your ID check</Badge> : <Badge tone="teal">Linked</Badge>}{frozen && <Badge tone="danger" icon={<Snowflake className="size-3" />}>Frozen</Badge>}</div>
             <div className="text-[13.5px] text-ink-2">@{m.handle}</div>
           </div>
           <div className="flex gap-2">
@@ -98,6 +111,11 @@ function Overview({ m }: { m: MinorDto }) {
           ))}
         </div>
       </Card>
+      {m.link_status === 'pending_verification' && (
+        <Callout className="mt-6" tone="warn" icon={<ShieldCheck />} title="Verify your ID to finish linking" action={<Button size="sm" to="/app/verify?tab=id">Verify my ID</Button>}>
+          You’ve accepted {first(m.name)}’s invite. Their account opens, and you can approve contracts, once you pass ID verification.
+        </Callout>
+      )}
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader title="Needs your attention" />
@@ -144,11 +162,12 @@ function ContractApprovals({ m }: { m: MinorDto }) {
   const [review, setReview] = useState<ContractDto | null>(null)
   const [ok, setOk] = useState(false)
   const [busy, setBusy] = useState(false)
+  const phoneGuard = usePhoneGuard()
   const reload = () => { conf.reload(); contracts.reload() }
 
   const act = async (path: string, done: string, sub?: string) => {
     setBusy(true)
-    try { await api.post(path); toast(done, sub); setReview(null); setOk(false); reload() } catch (e) { toast('Couldn’t do that', errMsg(e), 'danger') } finally { setBusy(false) }
+    try { await api.post(path); toast(done, sub); setReview(null); setOk(false); reload() } catch (e) { if (!phoneGuard(e)) toast('Couldn’t do that', errMsg(e), 'danger') } finally { setBusy(false) }
   }
 
   if (conf.error) return <ErrorState error={conf.error} onRetry={reload} />
@@ -298,8 +317,9 @@ function Companies({ m }: { m: MinorDto }) {
 
 export function GuardianCalls() {
   const conf = useApi((s) => api.get<ConfirmationDto[]>('/guardians/confirmations', undefined, s), [])
+  const phoneGuard = usePhoneGuard()
   const request = async (id: string) => {
-    try { await api.post(`/guardians/confirmations/${id}/request-call`); toast('Call requested', 'We’ll call your verified number shortly.'); conf.reload() } catch (e) { toast('Couldn’t request a call', errMsg(e), 'danger') }
+    try { await api.post(`/guardians/confirmations/${id}/request-call`); toast('Call requested', 'We’ll call your verified number shortly.'); conf.reload() } catch (e) { if (!phoneGuard(e)) toast('Couldn’t request a call', errMsg(e), 'danger') }
   }
   return (
     <div>
@@ -387,8 +407,11 @@ export function GuardianChats() {
   )
 }
 
+/** GET /guardians/minors/{id}/chats: the minor's business and contract chats, oldest message first. */
+interface GuardianChatDto { id: string; conversation_id: string; type: 'business' | 'contract' | string; with: AuthorDto[]; messages: MessageDto[] }
+
 function Chats({ m }: { m: MinorDto }) {
-  const chats = useApi((s) => api.get<(ConversationDto & { messages?: { body: string; sender_id: string; created_at: string }[] })[]>(`/guardians/minors/${m.minor_id}/chats`, undefined, s), [m.minor_id])
+  const chats = useApi((s) => api.get<GuardianChatDto[]>(`/guardians/minors/${m.minor_id}/chats`, undefined, s), [m.minor_id])
   if (chats.error) return <ErrorState error={chats.error} onRetry={chats.reload} />
   if (!chats.data) return <Spinner />
   if (!chats.data.length) return <Empty icon={<Eye />} title="No company chats">When an approved company messages {first(m.name)}, you’ll be able to read it here.</Empty>
@@ -396,11 +419,25 @@ function Chats({ m }: { m: MinorDto }) {
     <div className="space-y-4">
       {chats.data.map((c) => (
         <Card key={c.id} className="p-5">
-          <div className="mb-3 flex items-center gap-2 text-[13px] font-bold text-ink"><Building2 className="size-4" />{c.with.map((w) => w.name ?? '@' + w.handle).join(', ')}</div>
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px] font-bold text-ink">
+            <Building2 className="size-4" />{(c.with ?? []).map((w) => w.name || '@' + w.handle).join(', ') || 'Company'}
+            <Badge tone="neutral">{c.type === 'contract' ? 'Contract chat' : 'Business chat'}</Badge>
+          </div>
           <div className="space-y-2">
-            {(c.messages ?? []).map((msg, i) => (
-              <div key={i} className={cn('flex', msg.sender_id === m.minor_id ? 'justify-end' : 'justify-start')}><div className={cn('max-w-[75%] rounded-2xl px-4 py-2 text-[14px]', msg.sender_id === m.minor_id ? 'bg-brand text-on-brand' : 'bg-surface-2 text-ink')}>{msg.body}</div></div>
-            ))}
+            {(c.messages ?? []).map((msg) => {
+              const mine = msg.sender_id === m.minor_id
+              return (
+                <div key={msg.id} className={cn('flex flex-col', mine ? 'items-end' : 'items-start')}>
+                  <div className={cn('max-w-[75%] rounded-2xl px-4 py-2 text-[14px] whitespace-pre-wrap', mine ? 'bg-brand text-on-brand' : 'bg-surface-2 text-ink')}>
+                    {msg.body}
+                    {!!msg.attachments?.length && <div className="mt-1 text-[12px] opacity-75">{msg.attachments.length} attachment{msg.attachments.length === 1 ? '' : 's'}</div>}
+                  </div>
+                  <div className="mt-0.5 px-1 text-[11px] text-ink-3">{dateTime(msg.created_at)}</div>
+                  {msg.warning && <div className="mt-1 max-w-[75%] text-[12px] text-warn">{msg.warning}</div>}
+                </div>
+              )
+            })}
+            {(c.messages ?? []).length === 0 && <p className="text-[13px] text-ink-2">No messages yet.</p>}
           </div>
         </Card>
       ))}

@@ -1,6 +1,6 @@
 import {
   Activity, BadgeCheck, BarChart3, Bell, Bot, Briefcase, Building2, CircleDollarSign, Clapperboard,   Compass, CreditCard, FileSignature, Gauge, Gavel, HandCoins, HeartHandshake, Home, Inbox, KeyRound, Lightbulb,
-  ListChecks, Map, Megaphone, MessageSquare, Mic2, Network, PhoneCall, Plus, ScrollText, Settings, Shield,
+  ListChecks, Map, Megaphone, Receipt, MessageSquare, Mic2, Network, PhoneCall, Plus, ScrollText, Settings, Shield,
   ShieldCheck, Smile, Sparkles, Store, Tags, TrendingUp, Upload, UserCog, Users, Rocket, Wallet, Wand2, LifeBuoy, Eye,
   type LucideIcon,
 } from 'lucide-react'
@@ -23,6 +23,8 @@ const footer: NavGroup = {
   title: 'Account',
   items: [
     { to: '/app/settings', label: 'Settings', icon: Settings },
+    // Payment history and refunds for people (companies have Billing). GET /payments works for every account.
+    { to: '/app/settings?tab=payments', label: 'Payments', icon: Receipt },
     { to: '/app/support', label: 'Help & support', icon: LifeBuoy },
   ],
 }

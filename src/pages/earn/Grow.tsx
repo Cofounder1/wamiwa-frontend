@@ -10,8 +10,8 @@ import { cn } from '@/lib/cn'
 import { Avatar, Badge, Button, Callout, Card, CardHeader, Field, PageHeader, Progress, Segmented, Select, Switch, Tabs, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { SplitBar, TimeChart } from '@/components/charts/Charts'
-import { pay } from '@/components/payments/PaymentSheet'
-import { isCancelled } from '@/api/payments'
+import { pay, REFUND_NOTE } from '@/components/payments/PaymentSheet'
+import { isCancelled, paymentMethod } from '@/api/payments'
 
 /* ── FD-06 + WA-08 Analytics ─────────────────────────────────────────────── */
 
@@ -128,7 +128,7 @@ interface VideoPlan { active: boolean; videos_left?: number; renews_at?: string;
 interface AiVideo { id: string; status: string; tier: string; seconds: number; script?: string; created_at: string; file?: string | null }
 
 export function AIVideo() {
-  const { role } = useSession()
+  const { role, me } = useSession()
   const [tier, setTier] = useState<'standard' | 'premium'>('standard')
   const [seconds, setSeconds] = useState(60)
   const [script, setScript] = useState('')
@@ -139,23 +139,42 @@ export function AIVideo() {
   const [planBusy, setPlanBusy] = useState(false)
   if (role === 'minor') return <Callout tone="neutral" icon={<Lock />} title="Not available">AI video is only available to under-18s inside a guardian-approved contract.</Callout>
 
+  // The backend only makes video of your own face, matched to your verified ID; check before anyone pays.
+  const idVerified = me.verification !== 'none'
   const generate = async () => {
     setBusy(true)
+    let paid = false
     try {
-      const cents = quote.data?.price_cents ?? 0
-      const payment_method = cents > 0 ? await pay(cents, `AI video · ${seconds}s ${tier}`) : null
+      // Price it again right before paying, so the payment is exactly what the backend charges.
+      const fresh = await api.get<Quote>('/ai-videos/quote', { seconds, tier })
+      quote.setData(fresh)
+      const payment_method = fresh.price_cents > 0 ? await pay(fresh.price_cents, `AI video · ${seconds}s ${tier}`) : null
+      paid = !!payment_method
       await api.post('/ai-videos', { script, seconds, tier, payment_method })
       toast('Generating your video', 'Jobs over 10 minutes notify you when done. If it fails, you get a retry or an automatic refund.')
       setScript(''); list.reload(); quote.reload(); plan.reload()
-    } catch (e) { if (!isCancelled(e)) toast('Couldn’t start', errMsg(e), 'danger') } finally { setBusy(false) }
+    } catch (e) {
+      if (!isCancelled(e)) toast('Couldn’t start', paid ? `${errMsg(e)} ${REFUND_NOTE}` : errMsg(e), 'danger')
+    } finally { setBusy(false) }
   }
-  const planAction = async (action: 'subscribe' | 'cancel') => {
+  const planAction = async (action: 'subscribe' | 'keep' | 'cancel') => {
     setPlanBusy(true)
+    let paid = false
     try {
-      if (action === 'subscribe') { await api.post('/ai-videos/plan', { payment_method: await pay(plan.data!.terms.price_cents, 'AI video plan · first month') }); toast('Video plan started', '15 videos this month, up to 2 minutes each.') }
-      else { await api.del('/ai-videos/plan'); toast('Plan cancelled', 'Your videos stay usable until the month ends.') }
+      if (action === 'subscribe') {
+        const payment_method = await pay(plan.data!.terms.price_cents, 'AI video plan · first month')
+        paid = true
+        await api.post('/ai-videos/plan', { payment_method })
+        toast('Video plan started', `${plan.data!.terms.videos} videos this month, up to ${plan.data!.terms.minutes_per_video} minutes each.`)
+      } else if (action === 'keep') {
+        // A plan set to end is kept without paying again: the backend only clears the flag.
+        await api.post('/ai-videos/plan', { payment_method: 'keep_plan' })
+        toast('Plan kept', `It renews on ${date(plan.data!.renews_at!)}.`)
+      } else { await api.del('/ai-videos/plan'); toast('Plan cancelled', 'Your videos stay usable until the month ends.') }
       plan.reload(); quote.reload()
-    } catch (e) { if (!isCancelled(e)) toast('Couldn’t update the plan', errMsg(e), 'danger') } finally { setPlanBusy(false) }
+    } catch (e) {
+      if (!isCancelled(e)) toast('Couldn’t update the plan', paid ? `${errMsg(e)} ${REFUND_NOTE}` : errMsg(e), 'danger')
+    } finally { setPlanBusy(false) }
   }
   const download = async (id: string) => {
     try {
@@ -164,6 +183,8 @@ export function AIVideo() {
     } catch (e) { toast('Not ready yet', errMsg(e), 'warn') }
   }
   const q = quote.data
+  // A quote for another length or quality (or one still loading) is not the price that will be charged.
+  const quoteReady = !!q && !quote.loading && q.seconds === seconds && q.tier === tier
   return (
     <div>
       <PageHeader title="AI video" subtitle="Generate video of yourself from a script. Your own face only, matched to your verified ID." />
@@ -190,9 +211,14 @@ export function AIVideo() {
             </div>
           </div>
           <div className="mt-6 flex items-center justify-between rounded-2xl bg-surface-2 p-4">
-            <div><div className="text-[12px] text-ink-2">{q && q.plan_videos_applied > 0 ? 'Covered by your plan' : 'Paid before generation'}</div><div className="text-[24px] font-extrabold text-ink num">{q ? usd(q.price_cents / 100) : '—'}</div></div>
-            <Button size="lg" icon={<Sparkles className="size-4" />} loading={busy} disabled={script.trim().length < 10 || !q} onClick={generate}>{q && q.price_cents > 0 ? 'Pay & generate' : 'Generate'}</Button>
+            <div><div className="text-[12px] text-ink-2">{q && q.plan_videos_applied > 0 ? 'Covered by your plan' : 'Paid before generation'}</div><div className={cn('text-[24px] font-extrabold text-ink num', !quoteReady && 'opacity-50')}>{q ? usd(q.price_cents / 100) : '—'}</div></div>
+            <Button size="lg" icon={<Sparkles className="size-4" />} loading={busy} disabled={script.trim().length < 10 || !quoteReady || !idVerified} onClick={generate}>{q && q.price_cents > 0 ? 'Pay & generate' : 'Generate'}</Button>
           </div>
+          {!idVerified && (
+            <Callout className="mt-4" tone="warn" icon={<ShieldCheck />} action={<Button size="sm" to="/app/verify">Verify ID</Button>}>
+              Verify your ID first. AI video only uses your own face, matched to your verified identity.
+            </Callout>
+          )}
         </Card>
         <div className="space-y-6">
         <Card className="p-5">
@@ -205,7 +231,7 @@ export function AIVideo() {
               <div className="mt-4 text-[13.5px] font-semibold text-ink"><span className="num">{plan.data.videos_left}</span> of {plan.data.terms.videos} videos left this month</div>
               <Progress className="mt-2" value={plan.data.videos_left ?? 0} max={plan.data.terms.videos} tone="teal" />
               {plan.data.cancel_at_period_end
-                ? <Button className="mt-4 w-full" variant="outline" loading={planBusy} onClick={() => planAction('subscribe')}>Keep my plan</Button>
+                ? <Button className="mt-4 w-full" variant="outline" loading={planBusy} onClick={() => planAction('keep')}>Keep my plan</Button>
                 : <Button className="mt-4 w-full" variant="ghost" loading={planBusy} onClick={() => planAction('cancel')}>Cancel plan</Button>}
             </>
           ) : <Button className="mt-4 w-full" loading={planBusy} onClick={() => planAction('subscribe')}>Get the plan</Button>}
@@ -283,6 +309,7 @@ export function Subscription() {
   const { refreshMe, me } = useSession()
   const sub = useApi((s) => api.get<SubDto>('/subscriptions', undefined, s), [])
   const plans = useApi((s) => api.get<Plans>('/subscriptions/plans', undefined, s), [])
+  const method = useApi(() => paymentMethod(), [])
   const [cycle, setCycle] = useState<'monthly' | 'yearly'>('monthly')
   const [busy, setBusy] = useState<string | null>(null)
   if (sub.error) return <ErrorState error={sub.error} onRetry={sub.reload} />
@@ -291,19 +318,34 @@ export function Subscription() {
   const current: Tier | null = s.subscribed ? (s.tier ?? 'standard') : null
   const cancelled = !!s.ends_at
   const period = current ? (s.period ?? 'monthly') : cycle
-  const run = async (key: string, call: () => Promise<unknown>, title: string, body?: string) => {
+  // `paid` is set once money has been taken, so a failure after that says it will be refunded.
+  const run = async (key: string, call: (paid: () => void) => Promise<unknown>, title: string, body?: string) => {
     setBusy(key)
-    try { await call(); toast(title, body); sub.reload(); void refreshMe() } catch (e) { if (!isCancelled(e)) toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(null) }
+    let charged = false
+    try { await call(() => { charged = true }); toast(title, body); sub.reload(); void refreshMe() } catch (e) {
+      if (!isCancelled(e)) toast('Couldn’t update', charged ? `${errMsg(e)} ${REFUND_NOTE}` : errMsg(e), 'danger')
+    } finally { setBusy(null) }
   }
   const plansData = plans.data
-  const subscribe = (tier: Tier) => run(tier, async () => api.post('/subscriptions', {
-    payment_method: await pay(plansData.tiers[tier][cycle].usd_cents, `${plansData.tiers[tier].name} subscription · ${cycle}`), period: cycle, tier }), 'Subscribed!', tier === 'pro' ? 'Your partner suggestions are ready.' : 'Daily ideas start tomorrow morning.')
+  const subscribe = (tier: Tier) => run(tier, async (paid) => {
+    const payment_method = await pay(plansData.tiers[tier][cycle].usd_cents, `${plansData.tiers[tier].name} subscription · ${cycle}`)
+    paid()
+    return api.post('/subscriptions', { payment_method, period: cycle, tier })
+  }, 'Subscribed!', tier === 'pro' ? 'Your partner suggestions are ready.' : 'Daily ideas start tomorrow morning.')
+  // After cancelling, renewing the same plan charges a full period, added on from the current end date.
+  const renew = () => run('renew', async (paid) => {
+    const tier = current ?? 'standard'
+    const payment_method = await pay(plansData.tiers[tier][period].usd_cents, `${plansData.tiers[tier].name} subscription · renew ${period}`)
+    paid()
+    return api.post('/subscriptions', { payment_method, period, tier })
+  }, 'Subscription renewed', `Your plan continues after ${s.ends_at ? date(s.ends_at) : 'this period'}, with a new ${period === 'yearly' ? 'year' : 'month'} added on.`)
   // Moving up to Pro costs the difference for the days left (the backend quotes it); anything else isn't charged.
-  const change = (tier: Tier) => run(tier, async () => {
+  const change = (tier: Tier) => run(tier, async (paid) => {
     const charged = tier === 'pro' && current !== 'pro'
     const payment_method = charged
       ? await pay((await api.get<{ amount_cents: number }>('/subscriptions/upgrade-quote')).amount_cents, 'Upgrade to Pro for the rest of this period')
       : 'not_charged'
+    if (charged) paid()
     return api.patch('/subscriptions', { payment_method, tier })
   },
     tier === 'pro' ? 'Upgraded to Pro' : current === 'pro' && s.next_tier ? 'Staying on Pro' : 'Switching to Creator',
@@ -320,6 +362,7 @@ export function Subscription() {
     ['Hire agents to summarize your chats', '—', '—', 'Yes'],
   ]
   const idVerified = me.verification !== 'none'
+  const inNaira = method.data?.currency === 'NGN'
   return (
     <div>
       <PageHeader title="Subscription" subtitle="Two plans. A lapsed subscription only switches off extras. It never cancels paid contracts or blocks earnings." />
@@ -340,7 +383,7 @@ export function Subscription() {
                 {pending && <Badge tone="warn">From {date(s.renews_at!)}</Badge>}
               </div>
               <div className="mt-4 flex items-baseline gap-2"><span className="text-[44px] leading-none font-extrabold tracking-[-0.04em] num">{usd(price.usd_cents / 100)}</span><span className={tier === 'pro' ? 'opacity-70' : 'text-ink-2'}>/{period === 'monthly' ? 'month' : 'year'}</span></div>
-              <div className={cn('mt-1 text-[12.5px]', tier === 'pro' ? 'opacity-60' : 'text-ink-3')}>Charged as {naira(price.local)} at today’s rate</div>
+              {method.data && <div className={cn('mt-1 text-[12.5px]', tier === 'pro' ? 'opacity-60' : 'text-ink-3')}>{inNaira ? `Charged as ${naira(price.local)} at today’s rate${method.data.paypal.available ? ' (PayPal in US dollars)' : ''}` : 'Charged in US dollars'}</div>}
               <ul className="mt-5 flex-1 space-y-2">
                 {t.features.map((f) => <li key={f} className={cn('flex gap-2 text-[13.5px]', tier === 'pro' ? 'opacity-90' : 'text-ink-2')}><Check className={cn('mt-0.5 size-4 shrink-0', tier === 'pro' ? 'text-brand' : 'text-teal')} />{f}</li>)}
               </ul>
@@ -350,6 +393,7 @@ export function Subscription() {
                   ? <Button className="w-full" loading={busy === tier} onClick={() => change('pro')}>Upgrade to Pro</Button>
                   : pending ? <Button className="w-full" variant="secondary" loading={busy === 'pro'} onClick={() => change('pro')}>Keep Pro instead</Button>
                     : <Button className="w-full" variant="outline" loading={busy === tier} onClick={() => change('standard')}>Switch to Creator at renewal</Button>)}
+                {isCurrent && cancelled && <Button className="w-full" variant={tier === 'pro' ? 'primary' : 'outline'} loading={busy === 'renew'} onClick={renew}>Renew · {usd(price.usd_cents / 100)}</Button>}
                 {isCurrent && !cancelled && <Button className="w-full" variant={tier === 'pro' ? 'secondary' : 'outline'} loading={busy === 'cancel'} onClick={() => run('cancel', () => api.del('/subscriptions'), 'Subscription cancelled', 'Extras stay on until the end of the paid period.')}>Cancel subscription</Button>}
                 {isCurrent && tier === 'pro' && <Button className="mt-2 w-full" variant="link" to="/app/grow">Open Pro tools</Button>}
               </div>

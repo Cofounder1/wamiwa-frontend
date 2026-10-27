@@ -1,6 +1,3 @@
-/** Day's USD→NGN rate. Contracts lock the rate on the day the hirer pays (LK-02). */
-export const FX_NGN = 1540
-
 export const usd = (n: number, opts: { cents?: boolean } = {}) =>
   new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -8,9 +5,6 @@ export const usd = (n: number, opts: { cents?: boolean } = {}) =>
     minimumFractionDigits: opts.cents ? 2 : 0,
     maximumFractionDigits: opts.cents ? 2 : n % 1 === 0 ? 0 : 2,
   }).format(n)
-
-export const ngn = (usdAmount: number) =>
-  '₦' + new Intl.NumberFormat('en-NG', { maximumFractionDigits: 0 }).format(usdAmount * FX_NGN)
 
 export const compact = (n: number) =>
   new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n)

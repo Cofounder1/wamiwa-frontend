@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Bell, Bot, CircleDollarSign, Eye, FileSignature, Gavel, Heart, Lightbulb, MessageCircle, ShieldAlert, UserPlus } from 'lucide-react'
+import { Bell, CircleDollarSign, Eye, FileSignature, Gavel, Heart, Lightbulb, MessageCircle, ShieldAlert, UserPlus } from 'lucide-react'
 import { api } from '@/api/client'
 import { usePaged } from '@/api/hooks'
 import type { NotificationDto } from '@/api/types'
@@ -11,22 +11,20 @@ import { ErrorState, LoadMore, RowSkeleton } from '@/components/ui/states'
 
 const ICONS: Record<string, [React.ReactNode, string]> = {
   payment: [<CircleDollarSign key="1" />, 'bg-success-soft text-success'],
-  payout: [<CircleDollarSign key="1b" />, 'bg-success-soft text-success'],
   contract: [<FileSignature key="2" />, 'bg-brand-soft text-brand'],
-  offer: [<FileSignature key="2b" />, 'bg-brand-soft text-brand'],
   dispute: [<Gavel key="3" />, 'bg-warn-soft text-warn'],
   security: [<ShieldAlert key="4" />, 'bg-danger-soft text-danger'],
   legal: [<ShieldAlert key="4b" />, 'bg-danger-soft text-danger'],
+  admin: [<ShieldAlert key="4c" />, 'bg-brand-soft text-brand'],
   like: [<Heart key="5" />, 'bg-danger-soft text-danger'],
   comment: [<MessageCircle key="6" />, 'bg-wash text-ink-2'],
   message: [<MessageCircle key="6b" />, 'bg-wash text-ink-2'],
   profile_view: [<Eye key="7" />, 'bg-wash text-ink-2'],
-  post_idea: [<Lightbulb key="8" />, 'bg-warn-soft text-warn'],
-  agent: [<Bot key="9" />, 'bg-agent-soft text-agent'],
-  order: [<Bot key="9b" />, 'bg-agent-soft text-agent'],
+  post_ideas: [<Lightbulb key="8" />, 'bg-warn-soft text-warn'],
   follow: [<UserPlus key="10" />, 'bg-brand-soft text-brand'],
 }
-const ALWAYS_ON = new Set(['payment', 'payout', 'contract', 'offer', 'dispute', 'security', 'legal', 'order'])
+/** The types people can't switch off (NT-01); the same list as the API's MANDATORY_NOTIFICATIONS. */
+const ALWAYS_ON = new Set(['payment', 'contract', 'dispute', 'security', 'legal', 'admin'])
 
 /** Where a notification should take you, from the ids it carries. */
 function target(n: NotificationDto): string | undefined {
@@ -36,8 +34,13 @@ function target(n: NotificationDto): string | undefined {
   if (d.contract_id) return `/app/contracts/${d.contract_id}`
   if (d.dispute_id) return '/app/disputes'
   if (d.conversation_id) return `/app/messages/${d.conversation_id}`
-  if (n.type === 'payment' || n.type === 'payout') return '/app/earnings'
-  if (n.type === 'post_idea') return '/app/ideas'
+  if (d.ticket_id) return '/app/support'  // support replies
+  if (d.payout_id) return '/app/earnings'
+  if (d.follower_handle) return `/app/u/${d.follower_handle}`
+  if (d.link_id) return '/app/wamiwa-agent'
+  if (d.agent_id) return '/app/agents'
+  if (n.type === 'payment') return '/app/earnings'
+  if (n.type === 'post_ideas') return '/app/ideas'
   return undefined
 }
 

@@ -8,6 +8,18 @@ import { ErrorState, Spinner } from '@/components/ui/states'
 import { Badge, Button, Callout, Card, Empty, Field, Modal, PageHeader, Select, Stepper, Textarea, toast } from '@/components/ui/primitives'
 import { api, ApiError } from '@/api/client'
 
+/** Uploads each file and returns the upload refs, which is what the evidence endpoint takes. */
+async function uploadEvidence(files: File[]): Promise<string[]> {
+  const refs: string[] = []
+  for (const f of files) {
+    const form = new FormData()
+    form.append('kind', f.type.startsWith('image/') ? 'image' : f.type.startsWith('video/') ? 'video' : 'document')
+    form.append('file', f)
+    refs.push((await api.upload<{ ref: string }>('/uploads', form)).ref)
+  }
+  return refs
+}
+
 export function DisputeModal({ open, onClose, contractId, contractTitle, onOpened, misuse }: {
   open: boolean; onClose: () => void; contractId: string; contractTitle: string; onOpened?: () => void; misuse?: boolean
 }) {
@@ -16,23 +28,16 @@ export function DisputeModal({ open, onClose, contractId, contractTitle, onOpene
   const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const fullReason = `${reason}${details.trim() ? `: ${details.trim()}` : ''}`
   const submit = async () => {
     setBusy(true)
     setError(undefined)
     try {
       const d = await api.post<{ id: string }>(`/contracts/${contractId}/dispute`, {
-        reason: `${reason}${details ? `: ${details}` : ''}`, is_misuse_claim: reason === 'Misuse of likeness',
+        reason: fullReason, is_misuse_claim: reason === 'Misuse of likeness',
       })
       if (files.length) {
-        const attachments = []
-        for (const f of files) {
-          const form = new FormData()
-          form.append('kind', f.type.startsWith('image/') ? 'image' : f.type.startsWith('video/') ? 'video' : 'document')
-          form.append('file', f)
-          const up = await api.upload<{ ref: string }>('/uploads', form)
-          attachments.push({ kind: f.type.startsWith('image/') ? 'image' : f.type.startsWith('video/') ? 'video' : 'document', ref: up.ref, size_bytes: f.size })
-        }
-        await api.post(`/disputes/${d.id}/evidence`, { statement: details || reason, attachments })
+        await api.post(`/disputes/${d.id}/evidence`, { statement: details || reason, attachments: await uploadEvidence(files) })
       }
       onClose()
       onOpened?.()
@@ -45,7 +50,7 @@ export function DisputeModal({ open, onClose, contractId, contractTitle, onOpene
   }
   return (
     <Modal open={open} onClose={onClose} title="Open a dispute" subtitle={contractTitle}
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" disabled={!reason} loading={busy} onClick={submit}>Open dispute & freeze funds</Button></>}>
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" disabled={!reason || fullReason.length < 10} loading={busy} onClick={submit}>Open dispute & freeze funds</Button></>}>
       <Callout tone="warn" icon={<Scale />} className="mb-5">Opening a dispute freezes the escrow. An admin decides within 10 working days: release, refund or split.</Callout>
       <div className="space-y-4">
         <Field label="What went wrong?">
@@ -70,11 +75,11 @@ interface DisputeDto {
   id: string; contract_id: string; raised_by: string; reason: string; is_misuse_claim: boolean; status: string
   evidence_due_at: string | null; decision_due_at: string | null; decision: 'release' | 'refund' | 'split' | null; release_pct: number | null
   decision_reason: string | null; decided_at: string | null; appealed_by: string[]; appeal_reason: string | null
-  evidence?: { id?: string; submitted_by: string; statement: string; attachments: unknown[]; created_at: string }[]
+  evidence?: { id?: string; submitted_by: string; statement: string; attachments: string[]; at: string }[]
 }
 
 const STAGES = ['Opened', 'Evidence (5 days)', 'Admin decision (≤10 days)', 'Appeal window (3 days)', 'Final']
-const stageOf = (d: DisputeDto) => d.status === 'evidence' ? 1 : d.status === 'review' || d.status === 'open' ? 2 : d.status === 'decided' ? 3 : d.status === 'appealed' ? 3 : 4
+const stageOf = (d: DisputeDto) => d.status === 'evidence' ? 1 : d.status === 'under_review' ? 2 : d.status === 'decided' ? 3 : d.status === 'appealed' ? 3 : 4
 
 export default function Disputes() {
   const { me } = useSession()
@@ -95,16 +100,7 @@ export default function Disputes() {
         await api.post(`/disputes/${current}/appeal`, { reason: text })
         toast('Appeal sent', 'A Super Admin decides appeals. Their decision is final on Wamiwa.')
       } else {
-        const attachments = []
-        for (const f of files) {
-          const kind = f.type.startsWith('image/') ? 'image' : f.type.startsWith('video/') ? 'video' : 'document'
-          const form = new FormData()
-          form.append('kind', kind)
-          form.append('file', f)
-          const up = await api.upload<{ ref: string }>('/uploads', form)
-          attachments.push({ kind, ref: up.ref, size_bytes: f.size })
-        }
-        await api.post(`/disputes/${current}/evidence`, { statement: text, attachments })
+        await api.post(`/disputes/${current}/evidence`, { statement: text, attachments: await uploadEvidence(files) })
         toast('Evidence added')
       }
       setModal(null); setText(''); setFiles([]); detail.reload(); list.reload()
@@ -127,7 +123,7 @@ export default function Disputes() {
             {list.data.map((x) => (
               <button key={x.id} onClick={() => setSelected(x.id)} className={cn('block w-full px-5 py-4 text-left transition hover:bg-surface-2', x.id === current && 'bg-brand-soft/50')}>
                 <div className="line-clamp-2 text-[14px] font-bold text-ink">{x.reason}</div>
-                <div className="mt-1 flex items-center gap-2 text-[12px] text-ink-2"><Badge tone={x.decision ? 'success' : 'warn'}>{x.decision ?? x.status}</Badge>{x.raised_by === me.id ? 'You opened' : 'Opened against you'}</div>
+                <div className="mt-1 flex items-center gap-2 text-[12px] text-ink-2"><Badge tone={x.decision ? 'success' : 'warn'}>{x.decision ?? x.status.replace('_', ' ')}</Badge>{x.raised_by === me.id ? 'You opened' : 'Opened against you'}</div>
               </button>
             ))}
           </Card>
@@ -153,15 +149,15 @@ export default function Disputes() {
               <ul className="space-y-2">
                 {(d.evidence ?? []).map((e, i) => (
                   <li key={i} className="rounded-2xl border border-line p-4 text-[13.5px]">
-                    <div className="text-[12px] font-bold text-ink-2">{e.submitted_by === me.id ? 'You' : 'Other side'} · {date(e.created_at)}{e.attachments.length ? ` · ${e.attachments.length} file${e.attachments.length > 1 ? 's' : ''}` : ''}</div>
+                    <div className="text-[12px] font-bold text-ink-2">{e.submitted_by === me.id ? 'You' : 'Other side'} · {date(e.at)}{e.attachments.length ? ` · ${e.attachments.length} file${e.attachments.length > 1 ? 's' : ''}` : ''}</div>
                     <p className="mt-1 text-ink">{e.statement}</p>
                   </li>
                 ))}
                 {(d.evidence ?? []).length === 0 && <li className="text-[13px] text-ink-2">No evidence yet. Missing evidence counts against that side.</li>}
               </ul>
               <div className="mt-5 flex flex-wrap gap-2">
-                {!d.decision && <Button variant="outline" icon={<FileUp className="size-4" />} onClick={() => setModal('evidence')}>Add evidence</Button>}
-                {d.decision && !d.appealed_by.includes(me.id) && <Button variant="outline" onClick={() => setModal('appeal')}>Appeal decision</Button>}
+                {d.status === 'evidence' && <Button variant="outline" icon={<FileUp className="size-4" />} onClick={() => setModal('evidence')}>Add evidence</Button>}
+                {d.status === 'decided' && !d.appealed_by.includes(me.id) && <Button variant="outline" onClick={() => setModal('appeal')}>Appeal decision</Button>}
               </div>
               <Callout className="mt-6" tone="neutral" title="If you disagree with the decision">Each side can appeal once, within 3 days. Funds stay frozen for those 3 days. A Super Admin decides the appeal, and that decision is final on Wamiwa.</Callout>
             </Card>
@@ -169,7 +165,7 @@ export default function Disputes() {
         </div>
       )}
       <Modal open={!!modal} onClose={() => setModal(null)} title={modal === 'appeal' ? 'Appeal decision' : 'Add evidence'} subtitle={modal === 'appeal' ? 'One appeal per side, within 3 days of the decision.' : 'Statements, screenshots and files for the admin.'}
-        footer={<Button loading={busy} disabled={text.length < 5} onClick={submit}>{modal === 'appeal' ? 'Send appeal' : 'Submit evidence'}</Button>}>
+        footer={<Button loading={busy} disabled={text.trim().length < (modal === 'appeal' ? 10 : 3)} onClick={submit}>{modal === 'appeal' ? 'Send appeal' : 'Submit evidence'}</Button>}>
         <Textarea value={text} onChange={(e) => setText(e.target.value)} placeholder={modal === 'appeal' ? 'Why should the decision change? Add anything new.' : 'What happened, with dates.'} />
         {modal === 'evidence' && (
           <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong py-4 text-[13px] text-ink-2 hover:border-brand">

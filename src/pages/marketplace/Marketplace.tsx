@@ -5,17 +5,24 @@ import { acc } from '@/data/mock'
 import { agentArt } from '@/data/art'
 import { api } from '@/api/client'
 import { fromMarketAgent } from '@/api/adapt'
-import { usePaged } from '@/api/hooks'
+import { useApi, usePaged } from '@/api/hooks'
 import type { MarketAgentDto } from '@/api/types'
 import type { Account } from '@/data/types'
 import { ErrorState, LoadMore, Spinner } from '@/components/ui/states'
 import { compact, usd } from '@/lib/format'
 import { cn } from '@/lib/cn'
-import { Avatar, Badge, Card, Chip, Input, PageHeader, Select } from '@/components/ui/primitives'
+import { Avatar, Badge, Button, Card, Chip, Input, PageHeader, Select } from '@/components/ui/primitives'
 import { VerifiedMark } from '@/components/social/labels'
 
+/** GET /promotions/plans, only the prices this page shows. */
+interface PromoPlansDto { prices: Record<string, { base: { usd_cents: number } }> }
+
 export default function Marketplace() {
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
+  const similarTo = params.get('similar_to') ?? ''
+  const [maxPrice, setMaxPrice] = useState(0)
+  const promo = useApi((s) => api.get<PromoPlansDto>('/promotions/plans', undefined, s), [])
+  const fromCents = promo.data ? Math.min(...Object.values(promo.data.prices).map((p) => p.base.usd_cents)) : null
   const [q, setQ] = useState('')
   const [query, setQuery] = useState('')
   const [skill, setSkill] = useState(params.get('skill') ?? '')
@@ -23,8 +30,11 @@ export default function Marketplace() {
   const [minRating, setMinRating] = useState(0)
   useEffect(() => { const t = setTimeout(() => setQuery(q.trim()), 300); return () => clearTimeout(t) }, [q])
   const res = usePaged<MarketAgentDto, { dto: MarketAgentDto; a: Account }>(
-    (cursor, s) => api.page<MarketAgentDto>('/marketplace/agents', { q: query || undefined, skill: skill.toLowerCase() || undefined, min_rating: minRating || undefined, cursor, limit: 24 }, s),
-    (dto) => ({ dto, a: fromMarketAgent(dto) }), [query, skill, minRating],
+    (cursor, s) => api.page<MarketAgentDto>('/marketplace/agents', {
+      q: query || undefined, skill: skill.toLowerCase() || undefined, min_rating: minRating || undefined,
+      max_price_cents: maxPrice || undefined, similar_to: similarTo || undefined, cursor, limit: 24,
+    }, s),
+    (dto) => ({ dto, a: fromMarketAgent(dto) }), [query, skill, minRating, maxPrice, similarTo],
   )
   const minRate = (d: MarketAgentDto) => Math.min(...Object.values(d.rates), Infinity)
   const all = res.items.filter((x) => x.dto.handle !== 'wamiwa')
@@ -40,7 +50,7 @@ export default function Marketplace() {
         <Avatar src={wa.avatar} name={wa.name} kind="agent" size="xl" />
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2"><span className="text-[20px] font-extrabold">Wamiwa Agent</span><span className="rounded-badge bg-white/15 px-1.5 text-[11px] leading-5 font-bold">Owned by Wamiwa</span><span className="rounded-badge bg-brand px-1.5 text-[11px] leading-5 font-bold">Monthly plan</span></div>
-          <p className="mt-1 max-w-2xl text-[14px] text-white/75">Make your name tappable wherever adults mention you, answer “where can I buy…” with your link, and appear in Suggested sellers. From $20/month.</p>
+          <p className="mt-1 max-w-2xl text-[14px] text-white/75">Make your name tappable wherever adults mention you, answer “where can I buy…” with your link, and appear in Suggested sellers.{fromCents !== null && Number.isFinite(fromCents) ? ` From ${usd(fromCents / 100)}/month.` : ''}</p>
         </div>
         <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-white px-5 py-2.5 text-[14px] font-semibold text-harbor transition group-hover:gap-2.5 sm:self-center"><Megaphone className="size-4" />See plans<ArrowRight className="size-4" /></span>
       </Link>
@@ -49,7 +59,11 @@ export default function Marketplace() {
         <div className="flex-1"><Input icon={<Search />} placeholder="What do you need done? e.g. captions, translation, research" value={q} onChange={(e) => setQ(e.target.value)} className="h-12 rounded-pill" /></div>
         <Select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} className="h-12 sm:w-44"><option value="rating">Top rated</option><option value="orders">Most orders</option><option value="price">Lowest price</option></Select>
         <Select value={minRating} onChange={(e) => setMinRating(+e.target.value)} className="h-12 sm:w-36"><option value={0}>Any rating</option><option value={4.5}>4.5★ +</option><option value={4.8}>4.8★ +</option></Select>
+        <Select value={maxPrice} onChange={(e) => setMaxPrice(+e.target.value)} className="h-12 sm:w-40" aria-label="Maximum price"><option value={0}>Any price</option>{[5, 10, 25, 50, 100].map((d) => <option key={d} value={d * 100}>Up to {usd(d)}</option>)}</Select>
       </div>
+      {similarTo && (
+        <div className="mt-3 flex items-center gap-2 text-[13px] text-ink-2">Showing agents similar to one that’s no longer available.<Button size="xs" variant="ghost" onClick={() => setParams((p) => { p.delete('similar_to'); return p })}>Show all</Button></div>
+      )}
       <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto pb-1">
         <Chip active={!skill} onClick={() => setSkill('')}>All skills</Chip>
         {skills.map((s) => <Chip key={s} active={skill === s} onClick={() => setSkill(s)}>{s}</Chip>)}

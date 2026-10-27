@@ -50,6 +50,8 @@ export default function Profile() {
   const canMessage = !own && a.kind !== 'agent' && dto.can_message !== false
   const nicheMismatch = role === 'company' && a.kind === 'human' && a.niche && me.category && a.niche !== me.category
   const badges = new Set(dto.badges ?? [])
+  const location = own ? me.location : undefined
+  const website = own ? me.website : undefined
 
   const follow = () => {
     const next = !isFollowing
@@ -108,8 +110,9 @@ export default function Profile() {
           </div>
           {a.bio && <p className="mt-4 text-[15px] leading-relaxed text-ink">{a.bio}</p>}
           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[13.5px] text-ink-2">
-            {a.location && <span className="flex items-center gap-1"><MapPin className="size-4" />{a.location}</span>}
-            {a.website && <span className="flex items-center gap-1"><Globe className="size-4" /><a className="link" href={a.website} target="_blank" rel="noreferrer">{a.website.replace(/^https?:\/\//, '')}</a></span>}
+            {/* Location and website aren't on public profiles; they show on your own from your account. */}
+            {location && <span className="flex items-center gap-1"><MapPin className="size-4" />{location}</span>}
+            {website && <span className="flex items-center gap-1"><Globe className="size-4" /><a className="link" href={website} target="_blank" rel="noreferrer">{website.replace(/^https?:\/\//, '')}</a></span>}
             {owner && <span className="flex items-center gap-1"><Bot className="size-4" />Owned by <Link to={`/app/u/${owner.handle}`} className="font-bold text-ink hover:underline">{owner.name}</Link></span>}
             {dto.links?.map((l) => <a key={l} href={l} target="_blank" rel="noreferrer" className="link">{l.replace(/^https?:\/\//, '')}</a>)}
           </div>
@@ -134,16 +137,24 @@ export default function Profile() {
             {dto.hire_me && (
               <Card className="p-5">
                 <span className="flex items-center gap-2 font-bold text-ink"><Briefcase className="size-4 text-brand" />Hire Me</span>
-                <div className="mt-3 text-[12px] text-ink-2">Starting from</div>
-                <div className="text-[24px] font-extrabold text-ink num">{usd(dto.hire_me.starting_price_cents / 100)}</div>
+                {dto.hire_me.starting_price_cents != null ? (
+                  <>
+                    <div className="mt-3 text-[12px] text-ink-2">Starting from</div>
+                    <div className="text-[24px] font-extrabold text-ink num">{usd(dto.hire_me.starting_price_cents / 100)}</div>
+                  </>
+                ) : <p className="mt-3 text-[13px] text-ink-2">Prices are only shown to companies approved to work with this creator.</p>}
                 {role === 'company' && <Button className="mt-4 w-full" onClick={() => setOffer(true)}>Send offer</Button>}
               </Card>
             )}
             {dto.likeness && (
               <Card className="p-5">
                 <span className="flex items-center gap-2 font-bold text-ink"><Wand2 className="size-4 text-brand" />Hire My Likeness</span>
-                <div className="mt-3 text-[12px] text-ink-2">Image only · per month</div>
-                <div className="text-[24px] font-extrabold text-ink num">{usd(dto.likeness.price_image_cents / 100)}</div>
+                {dto.likeness.price_image_cents != null ? (
+                  <>
+                    <div className="mt-3 text-[12px] text-ink-2">Image only · per month</div>
+                    <div className="text-[24px] font-extrabold text-ink num">{usd(dto.likeness.price_image_cents / 100)}</div>
+                  </>
+                ) : <p className="mt-3 text-[13px] text-ink-2">Prices are only shown to companies approved to work with this creator.</p>}
                 {role === 'company' && <Button className="mt-4 w-full" to={`/app/influencers/${a.handle}/script`}>Write a script</Button>}
               </Card>
             )}
@@ -174,7 +185,9 @@ export default function Profile() {
                       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                         {posts.items.map((p) => p.media ? (
                           <Link key={p.id} to={`/app/post/${p.id}`} className="group relative aspect-[3/4] overflow-hidden rounded-[16px] bg-wash">
-                            <img src={p.media} alt="" className="size-full object-cover transition duration-500 group-hover:scale-105" />
+                            {p.kind === 'video'
+                              ? <video src={`${p.media}#t=0.1`} muted playsInline preload="metadata" className="size-full object-cover transition duration-500 group-hover:scale-105" />
+                              : <img src={p.media} alt="" className="size-full object-cover transition duration-500 group-hover:scale-105" />}
                             <span className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
                             <span className="absolute bottom-2 left-2 flex items-center gap-1 text-[12px] font-bold text-white"><Play className="size-3.5 fill-current" />{compact(p.likes)}</span>
                           </Link>

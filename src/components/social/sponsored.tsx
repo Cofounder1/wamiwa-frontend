@@ -58,7 +58,7 @@ function Plain({ text }: { text: string }) {
 interface CardDto {
   sponsored: boolean; name: string; kind: 'business' | 'seller' | 'artist' | 'label'; category?: string | null
   profile?: { id: string; handle: string } | null
-  links: { label: string; click_url: string; report_url: string }[]
+  links: { label: string; click_url: string; report_url?: string | null }[]
 }
 
 export function SmartMention({ cardUrl, children }: { cardUrl: string; children: ReactNode }) {
@@ -140,7 +140,7 @@ function SmartMentionCard({ cardUrl, anchor, onClose }: { cardUrl: string; ancho
                   <button onClick={() => open(l)} className="flex h-10 flex-1 items-center justify-between rounded-full border border-line bg-surface-2 px-4 text-[13.5px] font-semibold text-ink transition hover:border-brand hover:bg-brand-soft">
                     {l.label}<ArrowUpRight className="size-4 text-ink-3 group-hover:text-brand" />
                   </button>
-                  <button aria-label={`Report ${l.label} link`} onClick={() => setReporting(l.report_url)} className="grid size-8 place-items-center rounded-full text-ink-3 opacity-60 transition hover:bg-danger-soft hover:text-danger hover:opacity-100"><Flag className="size-3.5" /></button>
+                  {l.report_url && <button aria-label={`Report ${l.label} link`} onClick={() => setReporting(l.report_url!)} className="grid size-8 place-items-center rounded-full text-ink-3 opacity-60 transition hover:bg-danger-soft hover:text-danger hover:opacity-100"><Flag className="size-3.5" /></button>}
                 </div>
               ))}
               {c.links.length === 0 && <p className="text-[12.5px] text-ink-2">No links to share right now.</p>}

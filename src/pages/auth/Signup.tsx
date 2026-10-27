@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, AtSign, Building2, Check, Clock, FileUp, HeartHandshake, Lock, Mail, Phone, ShieldX, User, Users,
 } from 'lucide-react'
@@ -25,6 +25,9 @@ export default function Signup() {
   const [dob, setDob] = useState('')
   const nav = useNavigate()
   const { signInWith } = useSession()
+  // A return URL from an emailed link (e.g. a guardian invite): adults go straight back there after signing up.
+  const nextParam = useSearchParams()[0].get('next')
+  const next = nextParam?.startsWith('/') && !nextParam.startsWith('//') ? nextParam : undefined
 
   const order: Step[] = kind === 'person' ? ['type', 'email', 'otp', 'dob', 'account', 'profile', 'phone', 'friends'] : ['type', 'email', 'otp', 'account', 'company', 'company-review']
   const progress = Math.max(0, order.indexOf(step)) / (order.length - 1)
@@ -65,6 +68,7 @@ export default function Signup() {
           kind={kind} email={email} signupToken={signupToken} dob={dob}
           onCreated={async (tokens) => {
             const role = await signInWith(tokens)
+            if (next && kind === 'person' && role !== 'minor' && ageTier(dob) !== 'minor') { nav(next, { replace: true }); return }
             setStep(kind === 'company' ? 'company' : role === 'minor' || ageTier(dob) === 'minor' ? 'guardian' : 'profile')
           }}
         />
@@ -181,7 +185,7 @@ function EmailStep({ email, setEmail, onNext }: { email: string; setEmail: (v: s
         <Field label="Email"><Input icon={<Mail />} type="email" autoFocus autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => { setEmail(e.target.value); setError(undefined) }} /></Field>
         {error?.code === 'email_registered' ? (
           <Callout className="mt-4" tone="brand" title="This email is already registered" action={<Button size="sm" to={`/login?email=${encodeURIComponent(email)}`}>Log in instead</Button>}>
-            Forgot your password? <a href="#" className="link">Reset it</a>.
+            Forgot your password? <Link to={`/reset-password?email=${encodeURIComponent(email)}`} className="link">Reset it</Link>.
           </Callout>
         ) : error && <Callout className="mt-4" tone="danger">{error.message}</Callout>}
         <Button type="submit" size="lg" className="mt-6 w-full" disabled={!valid} loading={busy}>Send code</Button>
@@ -414,9 +418,12 @@ function PhoneStep({ onNext }: { onNext: () => void }) {
 function FriendsStep({ onDone }: { onDone: () => void }) {
   const fb = async () => {
     try {
-      const r = await api.get<unknown[]>('/friends/facebook')
-      toast('Facebook friends', `${r.length} friends who also connected Wamiwa`)
-    } catch (e) { toast('Couldn’t import', errText(e), 'warn') }
+      const r = await api.get<{ notice: string; friends: { id: string; handle: string; name: string }[] }>('/friends/facebook')
+      toast(`${r.friends.length} Facebook ${r.friends.length === 1 ? 'friend' : 'friends'} found`, r.notice)
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'facebook_not_connected') toast('Connect Facebook first', 'Connect your Facebook account under Verification › Verified creator, then import your friends.', 'warn')
+      else toast('Couldn’t import', errText(e), 'warn')
+    }
   }
   return (
     <Pane icon={<Users />} title="Find your friends" sub="See who’s already here.">

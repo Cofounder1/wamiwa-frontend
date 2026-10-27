@@ -8,11 +8,15 @@ import { usd } from '@/lib/format'
 import { Button, Callout, Modal } from '@/components/ui/primitives'
 import { Spinner } from '@/components/ui/states'
 
+/** Add to an error shown when a purchase fails after the person paid: payments that bought nothing are refunded. */
+export const REFUND_NOTE = 'If you were charged, it is refunded automatically within the hour.'
+
 interface Request { amountCents: number; description: string; resolve: (method: string) => void; reject: (e: unknown) => void }
 let show: ((r: Request) => void) | null = null
 
 /**
- * Takes a payment for exactly `amountCents` (US cents; Naira payers are charged at the day's rate) and resolves
+ * Takes a payment for exactly `amountCents` (US cents; Naira card payers are charged at the day's rate, PayPal is
+ * always in dollars) and resolves
  * with the `payment_method` to send with the purchase. Rejects with PaymentCancelled if the person backs out.
  */
 export function pay(amountCents: number, description: string): Promise<string> {
@@ -85,10 +89,14 @@ export function PaymentHost() {
           {method && !method.available && !paypal && !import.meta.env.DEV && (
             <Callout tone="warn" title="Payments aren’t open yet">We’re connecting our payment partner. Please try again soon.</Callout>
           )}
+          {method?.test_mode && (
+            <Callout tone="warn" icon={<FlaskConical className="size-4" />}>Test mode — use a Flutterwave test card. No real money moves.</Callout>
+          )}
           {error && <Callout tone="danger">{error}</Callout>}
           <p className="flex items-start gap-2 pt-1 text-[12.5px] text-ink-2">
-            {method?.currency === 'NGN' ? <><Lock className="mt-0.5 size-3.5 shrink-0" />Charged in Naira at today’s rate through Flutterwave. Wamiwa never sees your card details.</>
-              : <><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />Charged in US dollars. Wamiwa never sees your card details.</>}
+            {method?.available && method.currency === 'NGN'
+              ? <><Lock className="mt-0.5 size-3.5 shrink-0" />Card, bank transfer and USSD are charged in Naira at today’s rate through Flutterwave{paypal ? '; PayPal charges in US dollars' : ''}. Wamiwa never sees your card details.</>
+              : <><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />Charged in US dollars{paypal ? ', by card or PayPal' : ''}. Wamiwa never sees your card details.</>}
           </p>
         </div>
       )}

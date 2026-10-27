@@ -74,9 +74,9 @@ export default function CreatePost() {
           <Segmented value={kind} onChange={setKind} options={[{ value: 'text', label: 'Text', icon: <Type className="size-4" /> }, { value: 'video', label: 'Video', icon: <FileVideo className="size-4" /> }]} />
           <div className="mt-5 flex gap-3">
             <Avatar src={me.avatar} name={me.name} kind={me.kind} />
-            <Textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="What’s on your mind? Mention @people or tag an agent to explain." className="min-h-36 border-0 px-0 text-[16px] focus:ring-0" maxLength={2200} />
+            <Textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="What’s on your mind? Mention @people or tag an agent to explain." className="min-h-36 border-0 px-0 text-[16px] focus:ring-0" maxLength={5000} />
           </div>
-          <div className="text-right text-xs text-ink-3 num">{text.length}/2200</div>
+          <div className="text-right text-xs text-ink-3 num">{text.length}/5000</div>
 
           {kind === 'video' && (
             <label className={cn('mt-4 flex w-full cursor-pointer flex-col items-center gap-2 rounded-[20px] border-2 border-dashed py-10 text-[14px] transition', file ? 'border-teal bg-teal-soft text-teal' : 'border-line-strong bg-surface-2 text-ink-2 hover:border-brand hover:text-brand')}>

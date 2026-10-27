@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { Account, Post } from '@/data/types'
+import type { Account } from '@/data/types'
 import { api, ApiError, auth } from '@/api/client'
 import { fromMe } from '@/api/adapt'
 import type { LoginDto, MeDto } from '@/api/types'
@@ -44,8 +44,6 @@ interface Session {
   setTheme: (t: Theme) => void
   feed: 'people' | 'agents'
   setFeed: (f: 'people' | 'agents') => void
-  posts: Post[]
-  addPost: (p: Post) => void
   following: Set<string>
   /** Follow / unfollow; pass `on` when the current state is known from the API. */
   toggleFollow: (id: string, on?: boolean) => void
@@ -107,6 +105,19 @@ async function deriveRole(me: MeDto, fresh = false): Promise<Role> {
   return role
 }
 
+/** Everyone this person follows, page by page (bounded, so a huge list can't stall sign-in). */
+async function followingIds(maxPages = 20): Promise<string[]> {
+  const ids: string[] = []
+  let cursor: string | undefined
+  for (let i = 0; i < maxPages; i++) {
+    const page = await api.page<{ id: string }>('/follows/following', { limit: 100, cursor })
+    ids.push(...page.data.map((f) => f.id))
+    if (!page.next_cursor) break
+    cursor = page.next_cursor
+  }
+  return ids
+}
+
 const policyIn = { all: 'all', followed: 'following', none: 'none' } as const
 const policyOut = { all: 'all', following: 'followed', none: 'none' } as const
 
@@ -116,7 +127,6 @@ export function SessionProvider({ children, onError }: { children: ReactNode; on
   const [role, setRole] = useState<Role>('influencer')
   const [theme, setThemeState] = useState<Theme>(() => load('themePref', 'system'))
   const [feed, setFeedState] = useState<'people' | 'agents'>(() => load('feed', 'people'))
-  const [posts, setPosts] = useState<Post[]>([])
   const [following, setFollowing] = useState<Set<string>>(new Set())
   const [blocked, setBlocked] = useState<Set<string>>(new Set())
   const [liked, setLiked] = useState<Map<string, boolean>>(new Map())
@@ -127,13 +137,13 @@ export function SessionProvider({ children, onError }: { children: ReactNode; on
   const [myAgentIds, setMyAgentIds] = useState<Set<string>>(new Set())
   const report = useCallback((e: unknown) => onError?.(e), [onError])
 
-  const hydrate = useCallback(async (): Promise<Role | undefined> => {
+  const hydrate = useCallback(async (fresh = false): Promise<Role | undefined> => {
     try {
       const me = await api.get<MeDto>('/accounts/me')
       const people = !me.admin_role && me.type !== 'company'
       const [r, follows, blocks, agents] = await Promise.all([
-        deriveRole(me),
-        api.page<{ id: string }>('/follows/following', { limit: 100 }).then((p) => p.data).catch(() => []),
+        deriveRole(me, fresh),
+        followingIds().catch(() => [] as string[]),
         api.get<{ id?: string; account_id?: string }[]>('/blocks').catch(() => []),
         people && !me.profile?.is_minor ? api.get<{ id: string }[]>('/agents').catch(() => []) : Promise.resolve([]),
       ])
@@ -142,7 +152,7 @@ export function SessionProvider({ children, onError }: { children: ReactNode; on
       setSubscribedState(me.subscribed)
       setSponsoredOff(!me.sponsored_cards)
       setAgentCommentsState(policyIn[me.profile?.agent_comment_policy ?? 'all'])
-      setFollowing(new Set(follows.map((f) => f.id)))
+      setFollowing(new Set(follows))
       setBlocked(new Set(blocks.map((b) => (b.account_id ?? b.id)!)))
       setMyAgentIds(new Set(agents.map((a) => a.id)))
       setFeedState(me.feed_preference)
@@ -211,10 +221,10 @@ export function SessionProvider({ children, onError }: { children: ReactNode; on
   const value = useMemo<Session>(() => ({
     status, role, meDto, isAdmin: role === 'admin' || role === 'super_admin',
     me: meDto ? fromMe(meDto) : nobody,
-    login, logout, signInWith, refreshMe: hydrate,
+    // After an action that can change the role (becoming a guardian, deploying an agent), work it out again.
+    login, logout, signInWith, refreshMe: () => hydrate(true),
     subscribed, setSubscribed: setSubscribedState,
     theme, setTheme, feed, setFeed,
-    posts, addPost: (p) => setPosts((x) => [p, ...x]),
     following, toggleFollow: toggleRemote(setFollowing, following, (id) => `/follows/${id}`),
     blocked, toggleBlock: toggleRemote(setBlocked, blocked, (id) => `/blocks/${id}`),
     liked,
@@ -242,7 +252,7 @@ export function SessionProvider({ children, onError }: { children: ReactNode; on
     myAgentIds,
     canManage: (authorId) => authorId === meDto?.id || myAgentIds.has(authorId),
     onError: report,
-  }), [status, role, meDto, login, logout, signInWith, hydrate, subscribed, theme, setTheme, feed, setFeed, posts, following, blocked,
+  }), [status, role, meDto, login, logout, signInWith, hydrate, subscribed, theme, setTheme, feed, setFeed, following, blocked,
     liked, sponsoredCardsOff, agentComments, autoplay, myAgentIds, toggleRemote, report])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

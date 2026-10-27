@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   AtSign, Check, Copy, CreditCard, FileUp, Globe, KeyRound, Link2, Lock, MapPin, MessageSquare, Mic2, Plug, Plus, Receipt, RotateCcw, Send, ShieldCheck, Trash2,
 } from 'lucide-react'
-import { api, errMsg } from '@/api/client'
+import { api, ApiError, errMsg } from '@/api/client'
 import { fromPost } from '@/api/adapt'
 import { useApi } from '@/api/hooks'
 import type { PostDto } from '@/api/types'
@@ -11,22 +11,21 @@ import { useSession } from '@/context/session'
 import { date, naira, usd } from '@/lib/format'
 import { LIMITS } from '@/lib/rules'
 import { cn } from '@/lib/cn'
-import { Avatar, Badge, Button, Callout, Card, CardHeader, Empty, Field, Input, KV, Modal, PageHeader, Select, Stepper, Switch, toast } from '@/components/ui/primitives'
+import { Avatar, Badge, Button, Callout, Card, CardHeader, Empty, Field, Input, KV, Modal, PageHeader, Select, Stepper, Switch, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { BarList } from '@/components/charts/Charts'
 import type { PlanDto } from '@/pages/wamiwa/WamiwaAgent'
-import { RegionSelect, regionName, useRegions } from '@/components/ui/RegionPicker'
+import { RegionSelect } from '@/components/ui/RegionPicker'
 import { pay } from '@/components/payments/PaymentSheet'
-import { isCancelled } from '@/api/payments'
+import { isCancelled, paymentMethod } from '@/api/payments'
 
 const cap = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
 
 /* ── CO-03 B2B discovery ────────────────────────────────────────────────── */
 
-interface Buyer { id: string; handle: string; name: string; category: string | null; region?: string | null }
+interface Buyer { id: string; handle: string; name: string; category: string | null }
 
 export function B2B() {
-  const regions = useRegions()
   const { meDto, refreshMe } = useSession()
   const nav = useNavigate()
   const [q, setQ] = useState('')
@@ -59,10 +58,12 @@ export function B2B() {
           <Input icon={<AtSign />} value={q} onChange={(e) => setQ(e.target.value)} placeholder="@ to list likely buyers" className="h-12 rounded-pill" />
           <p className="mt-2 text-[12.5px] text-ink-2">Likely buyers come from a category map maintained by Wamiwa{meDto?.company?.category ? ` (for ${cap(meDto.company.category)})` : ''}.</p>
           <Card className="mt-5 divide-y divide-line">
-            {buyers.error ? <ErrorState compact error={buyers.error} onRetry={buyers.reload} /> : !buyers.data ? <Spinner className="min-h-32" /> : buyers.data.map((b) => (
+            {buyers.error?.code === 'company_verification_required' ? (
+              <div className="p-4"><Callout tone="warn" icon={<Lock />} title="Verify your business to use B2B discovery" action={<Button size="sm" to="/app/company/verify">Verify business</Button>}>Likely buyers and pitching are for verified companies.</Callout></div>
+            ) : buyers.error ? <ErrorState compact error={buyers.error} onRetry={buyers.reload} /> : !buyers.data ? <Spinner className="min-h-32" /> : buyers.data.map((b) => (
               <div key={b.id} className="flex items-center gap-4 p-4">
                 <Avatar name={b.name} kind="company" />
-                <div className="min-w-0 flex-1"><div className="font-bold text-ink">{b.name}</div><div className="text-[12.5px] text-ink-2">{cap(b.category)}{b.region ? ` · ${regionName(b.region, regions)}` : ''} · @{b.handle}</div></div>
+                <div className="min-w-0 flex-1"><div className="font-bold text-ink">{b.name}</div><div className="text-[12.5px] text-ink-2">{cap(b.category)} · @{b.handle}</div></div>
                 <Button size="sm" variant="outline" icon={<Send className="size-3.5" />} onClick={() => setPitch(b)}>Pitch</Button>
               </div>
             ))}
@@ -209,12 +210,21 @@ Idempotency-Key: 7c1e2b9a-reply-cm6
 
 interface PaymentDto { id: string; purpose: string; amount_cents: number; amount_local: number; currency: string; status: string; refunded_local: number; created_at: string }
 interface PricesDto { pay_per_video_cents: number; included_seconds: number; extra_final_render_cents: number; extra_minute_cents: number; plans: Record<'growth' | 'scale', { price_cents: number; videos: number }>; arcon_filing: unknown }
-const PURPOSE: Record<string, string> = { subscription: 'Subscription', promotion: 'Wamiwa Agent', escrow: 'Escrow', contract: 'Escrow', video: 'Video production', video_plan: 'Video plan', ai_video: 'AI video', extra_render: 'Extra final render', arcon: 'ARCON filing' }
+/** Labels for the backend's PaymentPurpose values (app/core/enums.py). */
+const PURPOSE: Record<string, string> = {
+  escrow: 'Escrow', subscription: 'Subscription', ai_video: 'AI video', video_production: 'Video production', video_plan: 'Video plan',
+  extra_render: 'Extra final render', arcon_filing: 'ARCON filing', promotion: 'Wamiwa Agent', ai_video_plan: 'AI video plan', equity_fee: 'Equity deal fee',
+}
+interface VideoPlanStatusDto { active: boolean; plan?: string | null; videos_left: number; rollover_left: number; renews_at?: string | null; cancel_at_period_end?: boolean }
+/** An amount in a currency's minor units (kobo, cents). */
+const money = (minor: number, currency: string) => currency === 'NGN' ? naira(minor)
+  : new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 2 }).format(minor / 100)
 
 export function Billing() {
   const prices = useApi((s) => api.get<PricesDto>('/video-plans/prices', undefined, s), [])
-  const plan = useApi((s) => api.get<{ active: boolean; plan?: string | null; videos_left: number; rollover_left: number; renews_at?: string | null }>('/video-plans', undefined, s), [])
+  const plan = useApi((s) => api.get<VideoPlanStatusDto>('/video-plans', undefined, s), [])
   const payments = useApi((s) => api.page<PaymentDto>('/payments', { limit: 30 }, s), [])
+  const method = useApi(() => paymentMethod(), [])
   const [busy, setBusy] = useState(false)
   if (prices.error) return <ErrorState error={prices.error} onRetry={prices.reload} />
   if (!prices.data || !plan.data) return <Spinner />
@@ -223,6 +233,22 @@ export function Billing() {
     setBusy(true)
     try { await fn(); toast(msg); plan.reload(); payments.reload() } catch (e) { if (!isCancelled(e)) toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(false) }
   }
+  const choose = async (id: 'growth' | 'scale', name: string) => {
+    setBusy(true)
+    let paid = false
+    try {
+      const payment_method = await pay(pr.plans[id].price_cents, `${name} video plan · first month`)
+      paid = true
+      await api.post('/video-plans', { plan: id, payment_method })
+      toast(`${name} plan started`); plan.reload(); payments.reload()
+    } catch (e) {
+      if (isCancelled(e)) return
+      toast('Couldn’t start the plan', paid ? `${errMsg(e)} If you were charged, it is refunded automatically within the hour.` : errMsg(e), 'danger')
+      plan.reload()
+    } finally { setBusy(false) }
+  }
+  const locked = plan.data.active && !plan.data.cancel_at_period_end
+  const payCurrency = method.data?.currency
   const cards = [
     { id: null, name: 'Pay per video', price: usd(pr.pay_per_video_cents / 100), sub: `per video, up to ${pr.included_seconds}s`, note: '4 drafts + 2 finals' },
     ...(['growth', 'scale'] as const).map((k) => ({ id: k, name: cap(k), price: usd(pr.plans[k].price_cents / 100), sub: `/month · ${pr.plans[k].videos} videos`, note: `About ${usd(pr.plans[k].price_cents / pr.plans[k].videos / 100)} each` })),
@@ -230,7 +256,7 @@ export function Billing() {
   const currentPlan = plan.data.active ? plan.data.plan ?? null : null
   return (
     <div>
-      <PageHeader title="Billing & refunds" subtitle="Prices shown in USD, charged in Naira at the day’s rate and locked for each contract." />
+      <PageHeader title="Billing & refunds" subtitle={!payCurrency ? 'Prices shown in USD.' : payCurrency === 'NGN' ? 'Prices shown in USD, charged in Naira at the day’s rate and locked for each contract.' : 'Prices and charges in US dollars.'} />
       <h2 className="mb-3 text-[16px] font-extrabold text-ink">Video plan</h2>
       <div className="grid gap-4 md:grid-cols-3">
         {cards.map((p) => {
@@ -240,7 +266,8 @@ export function Billing() {
               <div className="flex items-center justify-between"><span className="font-bold text-ink">{p.name}</span>{current && <Badge>Current</Badge>}</div>
               <div className="mt-2 text-[28px] font-extrabold text-ink num">{p.price}<span className="ml-1 text-[13px] font-normal text-ink-2">{p.sub}</span></div>
               <div className="text-[12.5px] text-ink-2">{p.note}</div>
-              {!current && p.id && <Button size="sm" className="mt-4" loading={busy} onClick={() => act(async () => api.post('/video-plans', { plan: p.id, payment_method: await pay(pr.plans[p.id as 'growth' | 'scale'].price_cents, `${p.name} video plan · first month`) }), `${p.name} plan started`)}>Choose {p.name}</Button>}
+              {current && p.id && plan.data!.cancel_at_period_end && plan.data!.renews_at && <Badge tone="warn" className="mt-4">Ends {date(plan.data!.renews_at)}</Badge>}
+              {!current && p.id && !locked && <Button size="sm" className="mt-4" loading={busy} onClick={() => choose(p.id as 'growth' | 'scale', p.name)}>Choose {p.name}</Button>}
             </div>
           )
         })}
@@ -251,9 +278,10 @@ export function Billing() {
           <div><div className="text-[12.5px] text-ink-2">Rolled over</div><div className="text-[22px] font-extrabold text-ink num">{plan.data.rollover_left}</div></div>
           <div><div className="text-[12.5px] text-ink-2">Extra final render</div><div className="text-[22px] font-extrabold text-ink num">{usd(pr.extra_final_render_cents / 100)}</div></div>
           <div><div className="text-[12.5px] text-ink-2">Extra length</div><div className="text-[22px] font-extrabold text-ink num">{usd(pr.extra_minute_cents / 100)}/min</div></div>
-          {plan.data.active && <Button className="ml-auto" size="sm" variant="ghost" loading={busy} onClick={() => act(() => api.del('/video-plans'), 'Plan cancelled at the end of the paid month')}>Cancel plan</Button>}
+          {locked && <Button className="ml-auto" size="sm" variant="ghost" loading={busy} onClick={() => act(() => api.del('/video-plans'), 'Plan cancelled at the end of the paid month')}>Cancel plan</Button>}
+          {plan.data.active && plan.data.cancel_at_period_end && <span className="ml-auto text-[13px] text-ink-2">Cancelled · ends {plan.data.renews_at ? date(plan.data.renews_at) : 'at the end of the paid month'}</span>}
         </div>
-        <p className="mt-3 text-[12px] text-ink-3">Unused plan videos roll over for one month, then expire. Cancelling takes effect at the end of the paid month.</p>
+        <p className="mt-3 text-[12px] text-ink-3">Unused plan videos roll over for one month, then expire. Cancelling takes effect at the end of the paid month.{locked ? ' To switch plans, cancel this one first; you can choose another before it ends.' : ''}</p>
       </Card>
 
       <h2 className="mt-10 mb-3 text-[16px] font-extrabold text-ink">Payments & refunds</h2>
@@ -262,7 +290,7 @@ export function Billing() {
           <thead><tr className="border-b border-line bg-surface-2 text-left text-[12px] text-ink-2"><th className="px-5 py-2.5 font-semibold">Date</th><th className="px-3 font-semibold">For</th><th className="px-3 text-right font-semibold">USD</th><th className="px-3 text-right font-semibold">Charged</th><th className="px-5 text-right font-semibold">Status</th></tr></thead>
           <tbody className="divide-y divide-line">
             {(payments.data?.data ?? []).map((p) => (
-              <tr key={p.id}><td className="px-5 py-3 text-ink-2">{date(p.created_at)}</td><td className="px-3 font-semibold text-ink">{PURPOSE[p.purpose] ?? cap(p.purpose.replace(/_/g, ' '))}</td><td className="px-3 text-right num">{usd(p.amount_cents / 100)}</td><td className="px-3 text-right text-ink-2 num">{naira(p.amount_local)}</td><td className="px-5 text-right"><Badge tone={p.refunded_local ? 'warn' : p.status === 'succeeded' ? 'success' : 'neutral'}>{p.refunded_local ? `Refunded ${naira(p.refunded_local)}` : p.status}</Badge></td></tr>
+              <tr key={p.id}><td className="px-5 py-3 text-ink-2">{date(p.created_at)}</td><td className="px-3 font-semibold text-ink">{PURPOSE[p.purpose] ?? cap(p.purpose.replace(/_/g, ' '))}</td><td className="px-3 text-right num">{usd(p.amount_cents / 100)}</td><td className="px-3 text-right text-ink-2 num">{money(p.amount_local, p.currency)}</td><td className="px-5 text-right"><Badge tone={p.refunded_local ? 'warn' : p.status === 'succeeded' ? 'success' : 'neutral'}>{p.refunded_local ? `Refunded ${money(p.refunded_local, p.currency)}` : p.status.replace(/_/g, ' ')}</Badge></td></tr>
             ))}
             {payments.data?.data.length === 0 && <tr><td colSpan={5} className="px-5 py-8 text-center text-ink-2">No payments yet.</td></tr>}
           </tbody>
@@ -320,11 +348,24 @@ export function CompanySettings() {
   const [optOut, setOptOut] = useState(!!c?.b2b_opt_out)
   const [site, setSite] = useState(c?.website ?? '')
   const [region, setRegion] = useState(c?.region_targeting ?? '')
+  const [category, setCategory] = useState(c?.category ?? '')
+  // The bio isn't on /me; it's on the public profile.
+  const profile = useApi(meDto ? (s) => api.get<{ bio?: string | null }>(`/profiles/${meDto.handle}`, undefined, s) : null, [meDto?.handle])
+  const [bio, setBio] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const save = async () => {
+    // Only what changed. "" clears the website and region targeting.
+    const body: Record<string, unknown> = {}
+    if (allow !== !!c?.allow_user_messages) body.allow_user_messages = allow
+    if (optOut !== !!c?.b2b_opt_out) body.b2b_opt_out = optOut
+    if (site.trim() !== (c?.website ?? '')) body.website = site.trim()
+    if (region !== (c?.region_targeting ?? '')) body.region_targeting = region
+    if (category.trim() && category.trim() !== (c?.category ?? '')) body.category = category.trim()
+    if (bio !== null && bio !== (profile.data?.bio ?? '')) body.bio = bio
+    if (!Object.keys(body).length) { toast('Nothing to save'); return }
     setBusy(true); setError(undefined)
-    try { await api.patch('/companies/settings', { allow_user_messages: allow, b2b_opt_out: optOut, website: site || null, region_targeting: region || null }); toast('Settings saved'); void refreshMe() } catch (e) { setError(errMsg(e)) } finally { setBusy(false) }
+    try { await api.patch('/companies/settings', body); toast('Settings saved'); setBio(null); profile.reload(); void refreshMe() } catch (e) { setError(errMsg(e)) } finally { setBusy(false) }
   }
   if (!meDto) return <Spinner />
   return (
@@ -338,11 +379,13 @@ export function CompanySettings() {
         <Field label="Website" hint="The default link the Wamiwa Agent shares when you haven’t added others. Checked for scams when set." error={error}>
           <Input icon={<Globe />} value={site} onChange={(e) => setSite(e.target.value)} placeholder="https://" />
         </Field>
+        <Field className="mt-4" label="Category" hint="What you sell. Used for B2B discovery and Suggested sellers."><Input value={category} maxLength={64} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. fashion" /></Field>
+        <Field className="mt-4" label="Bio" optional><Textarea value={bio ?? profile.data?.bio ?? ''} maxLength={2000} onChange={(e) => setBio(e.target.value)} placeholder="What your business does." /></Field>
       </Card>
       <Card className="mt-6 p-5">
         <div className="mb-2 flex items-center gap-2 text-[14px] font-bold text-ink"><MapPin className="size-4 text-brand" />Region targeting</div>
         <p className="mb-3 text-[13px] text-ink-2">Influencers in this country appear first. It never hides anyone completely.</p>
-        <RegionSelect className="max-w-sm" value={region} onChange={setRegion} placeholder="No preference" />
+        <div className="flex max-w-md items-center gap-2"><RegionSelect className="max-w-sm" value={region} onChange={setRegion} placeholder="No preference" />{region && <Button size="sm" variant="ghost" onClick={() => setRegion('')}>Clear</Button>}</div>
       </Card>
       <Card className="mt-6 flex items-center gap-4 p-5"><MessageSquare className="size-5 text-brand" /><div className="flex-1"><div className="font-bold text-ink">Contact Wamiwa support</div><div className="text-[13px] text-ink-2">Payments and safety issues get a reply within 4 hours.</div></div><Button variant="outline" to="/app/support">Open ticket</Button></Card>
       <Button className="mt-6" loading={busy} onClick={save}>Save changes</Button>
@@ -358,18 +401,25 @@ export function CompanyVerify() {
   const [reg, setReg] = useState('')
   const [file, setFile] = useState<File>()
   const [busy, setBusy] = useState(false)
+  const [taken, setTaken] = useState<string>()
   if (!meDto) return <Spinner />
   const status = c?.verification_status ?? (c?.verified ? 'passed' : 'not_started')
   const verified = !!c?.verified
-  const step = verified ? 3 : status === 'pending' || status === 'in_review' ? 2 : status === 'not_started' ? 0 : 1
+  const reviewing = status === 'pending' || status === 'in_review' || status === 'manual_review'
+  const failed = status === 'failed' || status === 'rejected'
+  const step = verified ? 3 : reviewing ? 2 : status === 'not_started' ? 0 : 1
   const submit = async () => {
-    setBusy(true)
+    setBusy(true); setTaken(undefined)
     try {
       const form = new FormData(); form.append('kind', 'document'); form.append('file', file!)
       const up = await api.upload<{ ref: string }>('/uploads', form)
       await api.post('/companies/verification', { registration_no: reg, document_ref: up.ref })
       toast('Submitted', 'An admin reviews business documents within 2 working days.'); void refreshMe()
-    } catch (e) { toast('Couldn’t submit', errMsg(e), 'danger') } finally { setBusy(false) }
+    } catch (e) {
+      // One business, one account: a registration already on Wamiwa is sorted out by support.
+      if (e instanceof ApiError && (e.code === 'company_already_registered' || e.code === 'registration_number_in_use')) setTaken(e.message)
+      else toast('Couldn’t submit', errMsg(e), 'danger')
+    } finally { setBusy(false) }
   }
   return (
     <div className="max-w-3xl">
@@ -379,11 +429,12 @@ export function CompanyVerify() {
         <div className="mt-8">
           {verified ? (
             <Callout tone="success" icon={<ShieldCheck />} title={`${me.name} is verified`}>Hiring, payments, B2B discovery, API access and the Wamiwa Agent are unlocked.</Callout>
-          ) : status === 'pending' || status === 'in_review' ? (
+          ) : reviewing ? (
             <Callout tone="warn" icon={<FileUp />} title="Under review">We’re checking your documents. Until then you can browse, but can’t pay, hire, message people about work or use APIs.</Callout>
           ) : (
             <div className="space-y-4">
-              {status === 'failed' && <Callout tone="danger" title="Verification failed">Please check your documents and submit again.</Callout>}
+              {failed && <Callout tone="danger" title="Verification failed">{status === 'rejected' ? 'An admin didn’t approve your documents. ' : ''}Please check your documents and submit again.</Callout>}
+              {taken && <Callout tone="danger" title="This business is already on Wamiwa" action={<Button size="sm" variant="outline" icon={<MessageSquare className="size-3.5" />} to="/app/support">Contact support</Button>}>{taken}</Callout>}
               <Field label="Registration number (CAC RC or equivalent)"><Input value={reg} onChange={(e) => setReg(e.target.value)} placeholder="RC 1234567" /></Field>
               <label className="flex cursor-pointer flex-col items-center gap-1 rounded-2xl border-2 border-dashed border-line-strong bg-surface-2 py-6 text-[13.5px] text-ink-2 hover:border-brand"><FileUp className="size-5 text-brand" />{file ? file.name : 'Upload CAC certificate (PDF, JPG, PNG)'}<input type="file" accept=".pdf,image/*" className="sr-only" onChange={(e) => setFile(e.target.files?.[0])} /></label>
               <Button loading={busy} disabled={!reg || !file} onClick={submit}>Submit for review</Button>

@@ -15,15 +15,13 @@ import { VerifiedMark } from '@/components/social/labels'
 import { ErrorState, LoadMore, PostSkeleton } from '@/components/ui/states'
 
 export default function Feed() {
-  const { feed, setFeed, blocked, posts: localPosts } = useSession()
+  const { feed, setFeed, blocked } = useSession()
   const list = usePaged<PostDto, Post>(
     (cursor, signal) => api.page<PostDto>('/feed', { tab: feed, cursor, limit: 20 }, signal),
     fromPost,
     [feed],
   )
-  // Posts created in this session appear first until the feed reloads.
-  const fresh = localPosts.filter((p) => p.id.startsWith('new:') && (feed === 'agents' ? p.label === 'agent' : p.label !== 'agent'))
-  const items = [...fresh, ...list.items.filter((p) => !fresh.some((f) => f.id === p.id))].filter((p) => !blocked.has(p.authorId))
+  const items = list.items.filter((p) => !blocked.has(p.authorId))
 
   return (
     <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -46,7 +44,7 @@ export default function Feed() {
               <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/10"><Eye className="size-5" /></span>
               <div>
                 <div className="text-[16px] font-extrabold">A social network for AI agents</div>
-                <p className="mt-0.5 text-[13.5px] text-white/75">Agents share, discuss and upvote. Humans are welcome to watch, tag an agent into a thread, or hire one.</p>
+                <p className="mt-0.5 text-[13.5px] text-white/75">Agents post and reply to each other. Humans are welcome to watch, tag an agent into a thread, or hire one.</p>
               </div>
             </div>
           </div>
