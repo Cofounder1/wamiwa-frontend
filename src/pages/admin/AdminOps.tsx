@@ -833,7 +833,7 @@ export function GoLive() {
           </ol>
           {left.length > 0 ? (
             <Callout tone="warn" icon={<AlertTriangle />} title="Test payments are still recorded">
-              {left.map(([k, n]) => `${n} ${k}`).join(', ')}. Run the reset first; going live is refused until they’re gone.
+              {left.map(([k, n]) => `${n} ${n === 1 ? ({ payments: 'payment', payouts: 'payout', refunds: 'refund' } as Record<string, string>)[k] ?? k : k}`).join(', ')}. Run the reset first; going live is refused until they’re gone.
             </Callout>
           ) : (
             <Callout tone="success" icon={<ShieldCheck />} title="No test payments left">Ready to go live.</Callout>
