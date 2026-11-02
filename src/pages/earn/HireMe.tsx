@@ -54,7 +54,9 @@ export default function HireMe() {
   return (
     <div>
       <PageHeader title="Hire Me page" subtitle="What brands see when they consider hiring you as a person." actions={<><Button variant="outline" icon={<Eye className="size-4" />} to={`/app/u/${me.handle}`}>Preview</Button><Button loading={busy} disabled={price <= 0} onClick={save}>Save</Button></>} />
-      {me.verification === 'none' && <Callout className="mb-6" tone="warn" title="Verify your identity first" action={<Button size="sm" to="/app/verify">Verify</Button>}>Hire Me needs ID verification (or guardian setup for under-18s).</Callout>}
+      {me.verification === 'none' && (role === 'minor'
+        ? <Callout className="mb-6" tone="warn" title="Your guardian sets this up" action={<Button size="sm" to="/app/guardian-link">My guardian</Button>}>Under-18s earn through Hire Me once a linked guardian has verified their ID. Brands’ offers then go to you and your guardian.</Callout>
+        : <Callout className="mb-6" tone="warn" title="Verify your identity first" action={<Button size="sm" to="/app/verify">Verify</Button>}>Hire Me needs ID verification.</Callout>)}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-6">
           <Card className="p-5">

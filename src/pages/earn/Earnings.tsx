@@ -5,12 +5,12 @@ import { fromContract, partyName, statusText } from '@/api/adapt'
 import { useApi, usePaged } from '@/api/hooks'
 import type { ContractDto, EarningsDto } from '@/api/types'
 import { useSession } from '@/context/session'
-import { date, naira } from '@/lib/format'
+import { date, naira, usd } from '@/lib/format'
 import { Badge, Button, Callout, Card, CardHeader, PageHeader, Stat } from '@/components/ui/primitives'
 import { ErrorState, LoadMore, RowSkeleton } from '@/components/ui/states'
 
 const stateTone = { Funded: 'neutral', Active: 'brand', Delivered: 'warn', Cleared: 'success', Paid: 'teal', Frozen: 'danger', Refunded: 'neutral' } as const
-interface PayoutDto { id: string; cycle_date?: string; created_at?: string; amount: number; currency?: string; status: string; items?: number }
+interface PayoutDto { id: string; cycle_date?: string; created_at?: string; amount: number; currency?: string; status: string; items?: number; failure_reason?: string | null }
 
 export default function Earnings() {
   const { role } = useSession()
@@ -79,8 +79,12 @@ export default function Earnings() {
             {payouts.items.map((p) => (
               <li key={p.id} className="flex items-center gap-3 px-5 py-3.5">
                 <span className="grid size-9 place-items-center rounded-full bg-success-soft text-success"><ArrowUpRight className="size-4" /></span>
-                <div className="flex-1"><div className="text-[14px] font-bold text-ink num">{naira(p.amount)}</div><div className="text-[12px] text-ink-2">{date(p.cycle_date ?? p.created_at ?? '')}</div></div>
-                <Badge tone={p.status === 'paid' ? 'success' : 'neutral'}>{p.status}</Badge>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[14px] font-bold text-ink num">{p.currency === 'USD' ? usd(p.amount / 100, { cents: true }) : naira(p.amount)}</div>
+                  <div className="text-[12px] text-ink-2">{date(p.cycle_date ?? p.created_at ?? '')}</div>
+                  {(p.status === 'held' || p.status === 'failed' || p.status === 'rejected') && p.failure_reason && <div className="mt-0.5 text-[12px] text-danger">{p.failure_reason}</div>}
+                </div>
+                <Badge tone={p.status === 'paid' ? 'success' : p.status === 'held' ? 'warn' : p.status === 'failed' || p.status === 'rejected' ? 'danger' : 'neutral'}>{p.status.replace('_', ' ')}</Badge>
               </li>
             ))}
             {!payouts.loading && payouts.items.length === 0 && <li className="px-5 py-8 text-center text-[13px] text-ink-2">No payouts yet. Cleared funds are paid every 2 weeks.</li>}

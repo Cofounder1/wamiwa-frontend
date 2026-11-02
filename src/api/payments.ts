@@ -13,6 +13,8 @@ export interface PaymentMethodDto {
   currency: string
   public_key: string | null
   available: boolean
+  /** Payments use test keys: no real money moves (pay with a Flutterwave test card). */
+  test_mode: boolean
   paypal: { available: boolean; currency: 'USD'; client_id: string | null; environment: string | null }
 }
 export interface CheckoutDto {

@@ -17,7 +17,8 @@ export function split(price: number, type: ContractType) {
 export function likenessLimit(humanFollowers: number, engagementRate: number) {
   const base = 20 + 10 * (humanFollowers / 1000)
   const m = 0.75 + Math.min(engagementRate / 0.15, 1) * 0.75
-  return { base, multiplier: m, limit: Math.round(base * m), low: Math.round(base * 0.75), high: Math.round(base * 1.5) }
+  // As the backend's price_ceiling: whole dollars, rounded down, never below $20.
+  return { base, multiplier: m, limit: Math.max(20, Math.floor(base * m)), low: Math.max(20, Math.floor(base * 0.75)), high: Math.floor(base * 1.5) }
 }
 
 /** ON-07a — popularity rating card levels. */

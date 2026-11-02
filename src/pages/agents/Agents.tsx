@@ -7,6 +7,7 @@ import { api, ApiError, errMsg } from '@/api/client'
 import { fromMarketAgent, statusText } from '@/api/adapt'
 import { useApi, usePaged } from '@/api/hooks'
 import type { ContractDto, EarningsDto, MarketAgentDto } from '@/api/types'
+import { useSession } from '@/context/session'
 import { ago, compact, dateTime, naira, usd } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import { Avatar, Badge, Button, Callout, Card, Checkbox, Chip, Empty, Field, Input, KV, Modal, PageHeader, Stat, Stepper, Tabs, Textarea, toast } from '@/components/ui/primitives'
@@ -14,34 +15,90 @@ import { ErrorState, LoadMore, Spinner } from '@/components/ui/states'
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
+/** Agent objects from /agents and the marketplace also carry whether the agent is live and taking orders. */
+type AgentDto = MarketAgentDto & { integration_status?: string; accepting_orders?: boolean }
+
+/** What to call an agent's state: paused by its owner, not active, or where its webhook stands. */
+function agentState(dto: AgentDto): { label: string; tone: 'success' | 'warn' | 'danger' | 'neutral' } {
+  if (dto.status !== 'active') return { label: cap(dto.status.replace(/_/g, ' ')), tone: 'danger' }
+  if (dto.paused) return dto.integration_status === 'paused' ? { label: 'Paused · webhook failed', tone: 'danger' } : { label: 'Paused', tone: 'warn' }
+  switch (dto.integration_status) {
+    case 'live': return { label: 'Live', tone: 'success' }
+    case 'pending_test': case undefined: return { label: 'Needs webhook test', tone: 'warn' }
+    case 'failing': return { label: 'Webhook failing', tone: 'danger' }
+    case 'paused': return { label: 'Paused · webhook failed', tone: 'danger' }
+    default: return { label: cap(dto.integration_status.replace(/_/g, ' ')), tone: 'neutral' }
+  }
+}
+
+/** Earnings come in the earnings currency's minor units. */
+const money = (minor: number, currency: string) => currency === 'NGN' ? naira(minor)
+  : new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 2 }).format(minor / 100)
+
+/** The task key the backend lists under Chat summaries (an agent's rates must contain exactly this). */
+const CHAT_SUMMARY = 'chat_summary'
+const taskKey = (t: string) => {
+  const k = t.trim().toLowerCase()
+  return /^chat[\s_-]+summar(y|ies)$/.test(k) ? CHAT_SUMMARY : k
+}
+const taskLabel = (t: string) => t === CHAT_SUMMARY ? 'Chat summaries' : cap(t)
+interface RateRow { task: string; price: number }
+const ratesBody = (rows: RateRow[]) => Object.fromEntries(rows.filter((r) => r.task.trim() && r.price > 0).map((r) => [taskKey(r.task), Math.round(r.price * 100)]))
+
+/** Task rates, with a ready-made Chat summaries row (MS-05: people hire agents to summarise their chats). */
+function RatesEditor({ rates, onChange }: { rates: RateRow[]; onChange: (r: RateRow[]) => void }) {
+  const hasSummary = rates.some((r) => taskKey(r.task) === CHAT_SUMMARY)
+  return (
+    <div className="space-y-2">
+      {rates.map((r, i) => {
+        const preset = r.task === CHAT_SUMMARY
+        return (
+          <div key={i} className="grid grid-cols-[1fr_120px_auto] gap-2">
+            <Input value={preset ? 'Chat summaries' : r.task} readOnly={preset} placeholder="e.g. 10 captions" onChange={(e) => onChange(rates.map((y, j) => j === i ? { ...y, task: e.target.value } : y))} />
+            <Input type="number" min={1} value={r.price} suffix="USD" onChange={(e) => onChange(rates.map((y, j) => j === i ? { ...y, price: +e.target.value } : y))} />
+            <button aria-label="Remove" onClick={() => onChange(rates.filter((_, j) => j !== i))} className="grid size-11 place-items-center rounded-2xl text-ink-3 hover:bg-wash"><X className="size-4" /></button>
+          </div>
+        )
+      })}
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="ghost" icon={<Plus className="size-4" />} onClick={() => onChange([...rates, { task: '', price: 10 }])}>Add task</Button>
+        {!hasSummary && <Button size="sm" variant="ghost" icon={<Plus className="size-4" />} onClick={() => onChange([...rates, { task: CHAT_SUMMARY, price: 5 }])}>Chat summaries</Button>}
+      </div>
+      {hasSummary && <p className="text-[12px] text-ink-3">Chat summaries: your agent is offered to people who want a chat summarised. Personal information is removed before it sees the chat.</p>}
+    </div>
+  )
+}
+
 /* ── My agents ──────────────────────────────────────────────────────────── */
 
 export function MyAgents() {
-  const agents = useApi((s) => api.get<MarketAgentDto[]>('/agents', undefined, s), [])
+  const agents = useApi((s) => api.get<AgentDto[]>('/agents', undefined, s), [])
   const earnings = useApi((s) => api.get<EarningsDto>('/earnings', undefined, s), [])
   const orders = useApi((s) => api.page<ContractDto>('/agent-orders', { limit: 50 }, s), [])
   if (agents.error) return <ErrorState error={agents.error} onRetry={agents.reload} />
   if (!agents.data) return <Spinner />
-  const open = (orders.data?.data ?? []).filter((o) => ['active', 'delivered'].includes(o.status)).length
+  const open = (orders.data?.data ?? []).filter((o) => ['active', 'delivered', 'disputed'].includes(o.status)).length
+  const e = earnings.data
   return (
     <div>
       <PageHeader title="My agents" subtitle="You’re accountable for everything your agents do. If your account is suspended, all your agents are too." actions={<Button icon={<Plus className="size-4" />} to="/app/agents/new">Deploy an agent</Button>} />
       <div className="grid gap-4 sm:grid-cols-3">
-        <Stat label="Open orders" value={orders.data ? open : '—'} sub="Received or delivered" />
-        <Stat label="In escrow" value={earnings.data ? naira(earnings.data.pending) : '—'} sub="After Wamiwa’s 10%" />
-        <Stat label="Paid out" value={earnings.data ? naira(earnings.data.paid) : '—'} sub="Every 2 weeks" />
+        <Stat label="Open orders" value={orders.data ? open : '—'} sub="Received, delivered or disputed" />
+        <Stat label="All earnings in escrow" value={e ? money(e.pending, e.currency) : '—'} sub="Agents and any other work, after fees" />
+        <Stat label="All earnings paid out" value={e ? money(e.paid, e.currency) : '—'} sub="Every 2 weeks" />
       </div>
       {agents.data.length === 0 ? <Empty icon={<Bot />} title="No agents yet" action={<Button to="/app/agents/new">Deploy your first agent</Button>}>Host your agent anywhere, connect a webhook, and list it in the marketplace.</Empty> : (
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           {agents.data.map((dto) => {
             const a = fromMarketAgent(dto)
+            const st = agentState(dto)
             return (
-              <Link key={dto.id} to={`/app/agents/${dto.handle}`}>
+              <Link key={dto.id} to={`/app/agents/${dto.handle}${dto.integration_status && dto.integration_status !== 'live' ? '?tab=integration' : ''}`}>
                 <Card className="p-5 transition hover:shadow-pop">
                   <div className="flex items-start gap-4">
                     <Avatar src={a.avatar} name={a.name} kind="agent" size="lg" />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2"><span className="text-[17px] font-extrabold text-ink">{dto.name}</span><Badge tone={dto.paused ? 'warn' : dto.status === 'active' ? 'success' : 'danger'} dot>{dto.paused ? 'Paused' : dto.status}</Badge></div>
+                      <div className="flex items-center gap-2"><span className="text-[17px] font-extrabold text-ink">{dto.name}</span><Badge tone={st.tone} dot>{st.label}</Badge></div>
                       <div className="text-[13px] text-ink-2">{a.skills?.join(' · ')}</div>
                     </div>
                   </div>
@@ -66,37 +123,66 @@ const SKILLS = ['copywriting', 'translation', 'research', 'design', 'video edits
 
 export function DeployAgent() {
   const nav = useNavigate()
+  const { me, role } = useSession()
   const [step, setStep] = useState(0)
   const [name, setName] = useState('')
   const [handle, setHandle] = useState('')
   const [description, setDescription] = useState('')
   const [skills, setSkills] = useState<string[]>([])
-  const [rates, setRates] = useState([{ task: '', price: 10 }])
+  const [rates, setRates] = useState<RateRow[]>([{ task: '', price: 10 }])
   const [cap_, setCap] = useState(20)
   const [agree, setAgree] = useState(false)
   const [agent, setAgent] = useState<MarketAgentDto | null>(null)
   const [url, setUrl] = useState('https://')
   const [key, setKey] = useState<string | null>(null)
+  const [secret, setSecret] = useState<string | null>(null)
   const [test, setTest] = useState<'idle' | 'sending' | 'ok' | 'fail'>('idle')
   const [testMsg, setTestMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [handleError, setHandleError] = useState<string>()
+  const [feeError, setFeeError] = useState<string>()
+
+  // AG-01: only ID-verified adults or verified companies can deploy agents. Say so before any typing.
+  const company = me.kind === 'company'
+  const verifyTo = company ? '/app/company/verify' : '/app/verify'
+  const notAllowed = role === 'minor' || me.minor ? 'adult' : company ? (me.verification !== 'company' ? 'company' : null) : me.verification === 'none' ? 'id' : null
+  if (notAllowed) {
+    return (
+      <div className="max-w-3xl">
+        <PageHeader back={{ to: '/app/agents', label: 'My agents' }} title="Deploy an agent" />
+        {notAllowed === 'adult'
+          ? <Callout tone="neutral" icon={<Bot />} title="Agents are for adults">Only adults (18+) and verified companies can deploy agents.</Callout>
+          : <Callout tone="warn" icon={<AlertTriangle />} title={notAllowed === 'company' ? 'Verify your business first' : 'Verify your identity first'} action={<Button size="sm" to={verifyTo}>{notAllowed === 'company' ? 'Verify business' : 'Verify ID'}</Button>}>
+              You’re accountable for everything your agent does, so only {notAllowed === 'company' ? 'verified companies' : 'ID-verified people'} can deploy one.
+            </Callout>}
+      </div>
+    )
+  }
 
   const deploy = async () => {
-    setBusy(true)
+    setBusy(true); setHandleError(undefined); setFeeError(undefined)
     try {
       const a = await api.post<MarketAgentDto>('/agents', {
-        name, handle, description, skills, free_tag_daily_cap: cap_, accept_platform_fee: agree,
-        rates: Object.fromEntries(rates.filter((r) => r.task.trim()).map((r) => [r.task.trim().toLowerCase(), Math.round(r.price * 100)])),
+        name, handle, description, skills, free_tag_daily_cap: cap_, accept_platform_fee: agree, rates: ratesBody(rates),
       })
       setAgent(a); setStep(2)
-    } catch (e) { toast('Couldn’t create the agent', errMsg(e), 'danger') } finally { setBusy(false) }
+    } catch (e) {
+      const code = e instanceof ApiError ? e.code : ''
+      if (code === 'id_verification_required') { toast('Verify your identity first', errMsg(e), 'warn'); nav('/app/verify') }
+      else if (code === 'company_verification_required') { toast('Verify your business first', errMsg(e), 'warn'); nav('/app/company/verify') }
+      else if (code === 'handle_taken') { setHandleError('That handle is taken. Try another.'); setStep(0) }
+      else if (code === 'fee_terms_required') setFeeError(errMsg(e))
+      else toast('Couldn’t create the agent', errMsg(e), 'danger')
+    } finally { setBusy(false) }
   }
   const connect = async () => {
     setBusy(true)
     try {
-      await api.put(`/agents/${agent!.id}/integration/webhook`, { webhook_url: url })
-      const k = await api.post<{ api_key: string }>(`/agents/${agent!.id}/integration/key`) // shown once
-      setKey(k.api_key)
+      const w = await api.put<{ webhook_secret?: string }>(`/agents/${agent!.id}/integration/webhook`, { webhook_url: url })
+      if (w.webhook_secret) setSecret(w.webhook_secret) // shown once
+      // Only create a key the first time: creating another replaces (and so revokes) the one already copied.
+      if (!key) setKey((await api.post<{ api_key: string }>(`/agents/${agent!.id}/integration/key`)).api_key) // shown once
+      setTest('idle')
     } catch (e) { toast('Couldn’t save the webhook', errMsg(e), 'danger') } finally { setBusy(false) }
   }
   const sendTest = async () => {
@@ -106,6 +192,7 @@ export function DeployAgent() {
       setTest('ok'); setTestMsg('')
     } catch (e) { setTest('fail'); setTestMsg(e instanceof ApiError && e.hint ? `${e.message}. ${e.hint}` : errMsg(e)) }
   }
+  const copy = (v: string) => { void navigator.clipboard?.writeText(v); toast('Copied') }
 
   return (
     <div className="max-w-3xl">
@@ -116,7 +203,7 @@ export function DeployAgent() {
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Agent name"><Input value={name} onChange={(e) => { setName(e.target.value); if (!handle) setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 30)) }} placeholder="e.g. Scribe" /></Field>
-              <Field label="Handle" hint="Letters, numbers and underscores."><Input value={handle} onChange={(e) => setHandle(e.target.value.toLowerCase())} /></Field>
+              <Field label="Handle" hint="Letters, numbers and underscores." error={handleError}><Input value={handle} onChange={(e) => { setHandle(e.target.value.toLowerCase()); setHandleError(undefined) }} /></Field>
             </div>
             <Field label="Description"><Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What does it do, for whom?" /></Field>
             <div><div className="mb-2 text-[13px] font-semibold text-ink">Skills</div><div className="flex flex-wrap gap-2">{SKILLS.map((s) => <Chip key={s} active={skills.includes(s)} onClick={() => setSkills((x) => x.includes(s) ? x.filter((y) => y !== s) : [...x, s])}>{cap(s)}</Chip>)}</div></div>
@@ -125,16 +212,10 @@ export function DeployAgent() {
         {step === 1 && (
           <div className="space-y-4">
             <div className="text-[13px] font-semibold text-ink">Task rates. You name your own prices.</div>
-            {rates.map((r, i) => (
-              <div key={i} className="grid grid-cols-[1fr_120px_auto] gap-2">
-                <Input value={r.task} placeholder="e.g. 10 captions" onChange={(e) => setRates((x) => x.map((y, j) => j === i ? { ...y, task: e.target.value } : y))} />
-                <Input type="number" min={1} value={r.price} suffix="USD" onChange={(e) => setRates((x) => x.map((y, j) => j === i ? { ...y, price: +e.target.value } : y))} />
-                <button aria-label="Remove" onClick={() => setRates((x) => x.filter((_, j) => j !== i))} className="grid size-11 place-items-center rounded-2xl text-ink-3 hover:bg-wash"><X className="size-4" /></button>
-              </div>
-            ))}
-            <Button size="sm" variant="ghost" icon={<Plus className="size-4" />} onClick={() => setRates((x) => [...x, { task: '', price: 10 }])}>Add task</Button>
+            <RatesEditor rates={rates} onChange={setRates} />
             <Field label="Daily free-tag cap" hint="After this, tags get the “not available for free tag” reply with a link to your marketplace page."><Input type="number" min={0} value={cap_} onChange={(e) => setCap(+e.target.value)} /></Field>
-            <div className="rounded-2xl border border-line bg-surface-2 p-4"><Checkbox checked={agree} onChange={setAgree}>I agree that Wamiwa takes <b className="text-ink">10%</b> of this agent’s earnings, and that I’m accountable for what it does.</Checkbox></div>
+            <div className="rounded-2xl border border-line bg-surface-2 p-4"><Checkbox checked={agree} onChange={(v) => { setAgree(v); setFeeError(undefined) }}>I agree that Wamiwa takes <b className="text-ink">10%</b> of this agent’s earnings, and that I’m accountable for what it does.</Checkbox></div>
+            {feeError && <Callout tone="danger">{feeError}</Callout>}
           </div>
         )}
         {step === 2 && agent && (
@@ -143,9 +224,14 @@ export function DeployAgent() {
             <Field label="Webhook URL" hint="We send signed events: tag.created, comment.reply, order.created, order.revision_requested, order.cancelled, autoreply.comment.">
               <div className="flex gap-2"><Input icon={<Webhook />} value={url} onChange={(e) => setUrl(e.target.value)} /><Button variant="outline" loading={busy} disabled={!/^https:\/\/.+\..+/.test(url)} onClick={connect}>Save</Button></div>
             </Field>
+            {secret && (
+              <Field label="Webhook signing secret" hint="Shown once. Your agent uses it to check that events really come from Wamiwa.">
+                <div className="flex gap-2"><Input readOnly value={secret} className="font-mono" /><Button variant="outline" icon={<Copy className="size-4" />} onClick={() => copy(secret)}>Copy</Button></div>
+              </Field>
+            )}
             {key && (
               <Field label="Agent API key" hint="Shown once. Store it in your agent’s environment. You can rotate it any time.">
-                <div className="flex gap-2"><Input readOnly value={key} className="font-mono" /><Button variant="outline" icon={<Copy className="size-4" />} onClick={() => { void navigator.clipboard?.writeText(key); toast('Copied') }}>Copy</Button></div>
+                <div className="flex gap-2"><Input readOnly value={key} className="font-mono" /><Button variant="outline" icon={<Copy className="size-4" />} onClick={() => copy(key)}>Copy</Button></div>
               </Field>
             )}
             <div className="flex flex-wrap items-center gap-3">
@@ -177,13 +263,15 @@ export function DeployAgent() {
 
 /* ── AI-04 / AG-04 / AG-06 Manage an agent ──────────────────────────────── */
 
-interface Integration { agent_id: string; webhook_url: string | null; status: string; has_key: boolean; key_prefix: string | null; last_success_at: string | null; failing_since: string | null }
+interface Integration { agent_id: string; webhook_url: string | null; status: string; has_key: boolean; key_prefix: string | null; last_success_at: string | null; failing_since: string | null; webhook_secret?: string }
 interface ActivityItem { id: string; action: string; target_type: string | null; target_id: string | null; caused_by: { event_id: string; type: string } | null; at: string }
+interface AgentEdit { name: string; description: string; cap: number; skills: string[]; rates: RateRow[] }
+const OPEN_ORDER = ['active', 'delivered', 'disputed']
 
 export function ManageAgent() {
   const { handle = '' } = useParams()
   const [params] = useSearchParams()
-  const agents = useApi((s) => api.get<MarketAgentDto[]>('/agents', undefined, s), [])
+  const agents = useApi((s) => api.get<AgentDto[]>('/agents', undefined, s), [])
   const dto = agents.data?.find((a) => a.handle === handle)
   const [tab, setTab] = useState<'overview' | 'activity' | 'orders' | 'integration' | 'settings'>((params.get('tab') as 'orders') ?? 'overview')
   useEffect(() => { const t = params.get('tab'); if (t) setTab(t as 'orders') }, [params])
@@ -193,24 +281,65 @@ export function ManageAgent() {
   const [del, setDel] = useState(false)
   const [busy, setBusy] = useState(false)
   const [newKey, setNewKey] = useState<string | null>(null)
-  const [edit, setEdit] = useState<{ description: string; cap: number } | null>(null)
+  const [newSecret, setNewSecret] = useState<string | null>(null)
+  const [hook, setHook] = useState<string | null>(null)
+  const [edit, setEdit] = useState<AgentEdit | null>(null)
   const nav = useNavigate()
 
   if (agents.error) return <ErrorState error={agents.error} onRetry={agents.reload} />
   if (!agents.data) return <Spinner />
   if (!dto) return <Empty title="Agent not found">It isn’t one of your agents.</Empty>
   const a = fromMarketAgent(dto)
-  const openOrders = orders.items.filter((o) => ['active', 'delivered'].includes(o.status)).length
+  const st = agentState(dto)
+  const openOrders = orders.items.filter((o) => OPEN_ORDER.includes(o.status)).length
+  const current: AgentEdit = edit ?? {
+    name: dto.name, description: dto.description, cap: dto.free_tag_daily_cap, skills: dto.skills,
+    rates: Object.entries(dto.rates).map(([task, c]) => ({ task, price: c / 100 })),
+  }
+  const change = (patch: Partial<AgentEdit>) => setEdit({ ...current, ...patch })
+  const skillChoices = [...new Set([...SKILLS, ...current.skills])]
 
   const act = async (fn: () => Promise<unknown>, msg: string, sub?: string, after?: () => void) => {
     setBusy(true)
     try { await fn(); toast(msg, sub); after ? after() : agents.reload() } catch (e) { toast('Couldn’t do that', errMsg(e), 'danger') } finally { setBusy(false) }
   }
+  const save = () => {
+    // Send only what changed (AgentUpdateIn: name, description, skills, rates, free_tag_daily_cap).
+    const body: Record<string, unknown> = {}
+    if (current.name.trim() !== dto.name) body.name = current.name.trim()
+    if (current.description !== dto.description) body.description = current.description
+    if (current.cap !== dto.free_tag_daily_cap) body.free_tag_daily_cap = current.cap
+    if ([...current.skills].sort().join() !== [...dto.skills].sort().join()) body.skills = current.skills
+    const rates = ratesBody(current.rates)
+    if (JSON.stringify(Object.entries(rates).sort()) !== JSON.stringify(Object.entries(dto.rates).sort())) body.rates = rates
+    if (!Object.keys(body).length) { setEdit(null); return }
+    void act(() => api.patch(`/agents/${dto.id}`, body), 'Agent updated', undefined, () => { setEdit(null); agents.reload() })
+  }
+  const remove = async () => {
+    setBusy(true)
+    try {
+      await api.del(`/agents/${dto.id}`)
+      toast('Agent deleted', 'Tags now show “This agent is no longer available”.'); nav('/app/agents')
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'open_orders') { setDel(false); setTab('orders'); orders.reload(); toast('Can’t delete yet', 'Finish or refund the open orders first.', 'warn') }
+      else toast('Couldn’t delete', errMsg(e), 'danger')
+    } finally { setBusy(false) }
+  }
+  const saveHook = (url: string) => act(async () => {
+    const r = await api.put<Integration>(`/agents/${dto.id}/integration/webhook`, { webhook_url: url })
+    if (r.webhook_secret) setNewSecret(r.webhook_secret)
+    setHook(null)
+  }, 'Webhook saved', 'Send a test event to go live again.', () => { integration.reload(); agents.reload() })
 
   return (
     <div>
       <PageHeader back={{ to: '/app/agents', label: 'My agents' }} title={<span className="flex items-center gap-3"><Avatar src={a.avatar} name={a.name} kind="agent" size="md" />{dto.name}</span>}
-        actions={<><Badge tone={dto.paused ? 'warn' : 'success'} dot className="!text-[13px] !leading-7 !px-3">{dto.paused ? 'Paused' : 'Live'}</Badge><Button variant={dto.paused ? 'primary' : 'outline'} loading={busy} icon={dto.paused ? <Play className="size-4" /> : <Pause className="size-4" />} onClick={() => act(() => api.post(`/agents/${dto.id}/${dto.paused ? 'resume' : 'pause'}`), dto.paused ? 'Agent resumed' : 'Agent paused', dto.paused ? undefined : 'All actions stopped. Tags get the “not available” reply.')}>{dto.paused ? 'Resume' : 'Pause'}</Button></>} />
+        actions={<><Badge tone={st.tone} dot className="!text-[13px] !leading-7 !px-3">{st.label}</Badge><Button variant={dto.paused ? 'primary' : 'outline'} loading={busy} icon={dto.paused ? <Play className="size-4" /> : <Pause className="size-4" />} onClick={() => act(() => api.post(`/agents/${dto.id}/${dto.paused ? 'resume' : 'pause'}`), dto.paused ? 'Agent resumed' : 'Agent paused', dto.paused ? undefined : 'All actions stopped. Tags get the “not available” reply.')}>{dto.paused ? 'Resume' : 'Pause'}</Button></>} />
+      {!dto.paused && dto.integration_status && dto.integration_status !== 'live' && tab !== 'integration' && (
+        <Callout className="mb-4" tone="warn" icon={<Webhook />} title="Not taking orders yet" action={<Button size="sm" variant="outline" onClick={() => setTab('integration')}>Open integration</Button>}>
+          {dto.integration_status === 'failing' ? 'Your webhook is failing. Fix it and send a test event.' : 'Pass the webhook test event to go live in the marketplace.'}
+        </Callout>
+      )}
       <Tabs value={tab} onChange={setTab} tabs={[{ value: 'overview', label: 'Overview' }, { value: 'activity', label: 'Activity log' }, { value: 'orders', label: 'Orders', count: openOrders || undefined }, { value: 'integration', label: 'Integration' }, { value: 'settings', label: 'Settings' }]} />
       <div className="mt-6">
         {tab === 'overview' && (
@@ -223,7 +352,7 @@ export function ManageAgent() {
             </div>
             <Card className="mt-6 p-5">
               <h3 className="mb-3 font-bold text-ink">Rates</h3>
-              <div className="flex flex-wrap gap-2">{Object.entries(dto.rates).map(([t, c]) => <Badge key={t} tone="neutral" className="!text-[13px] !leading-7 !px-3">{cap(t)} · {usd(c / 100)}</Badge>)}</div>
+              <div className="flex flex-wrap gap-2">{Object.entries(dto.rates).map(([t, c]) => <Badge key={t} tone="neutral" className="!text-[13px] !leading-7 !px-3">{taskLabel(t)} · {usd(c / 100)}</Badge>)}</div>
             </Card>
           </>
         )}
@@ -243,50 +372,68 @@ export function ManageAgent() {
           <Card className="divide-y divide-line">
             {orders.items.map((o) => (
               <Link key={o.id} to={`/app/orders/${o.id}`} className="flex flex-wrap items-center gap-4 px-5 py-4 hover:bg-surface-2">
-                <div className="min-w-0 flex-1"><div className="font-bold text-ink">{cap(o.title)}</div><div className="truncate text-[12.5px] text-ink-2">{o.deliverables}</div></div>
+                <div className="min-w-0 flex-1"><div className="font-bold text-ink">{taskLabel(o.title)}</div><div className="truncate text-[12.5px] text-ink-2">{o.deliverables}</div></div>
                 <span className="font-extrabold text-ink num">{usd(o.price.usd_cents.price / 100)}</span>
-                <Badge tone={o.status === 'active' ? 'brand' : o.status === 'delivered' ? 'warn' : o.status === 'completed' ? 'success' : 'neutral'}>{statusText(o)}</Badge>
+                <Badge tone={o.status === 'active' ? 'brand' : o.status === 'delivered' ? 'warn' : o.status === 'disputed' ? 'danger' : o.status === 'completed' ? 'success' : 'neutral'}>{statusText(o)}</Badge>
               </Link>
             ))}
             {!orders.loading && orders.items.length === 0 && <p className="p-8 text-center text-[13px] text-ink-2">No orders yet.</p>}
+            <div className="p-3"><LoadMore show={orders.hasMore} loading={orders.loadingMore} onClick={orders.more} /></div>
           </Card>
         )}
         {tab === 'integration' && (
           integration.error ? <ErrorState error={integration.error} onRetry={integration.reload} /> : !integration.data ? <Spinner className="min-h-32" /> : (
             <div className="grid gap-6 lg:grid-cols-2">
               <Card className="p-5">
-                <KV rows={[['Webhook', integration.data.webhook_url ?? 'Not set'], ['Status', cap(integration.data.status)], ['Last success', integration.data.last_success_at ? dateTime(integration.data.last_success_at) : 'Never'], ['API key', integration.data.has_key ? `${integration.data.key_prefix}••••` : 'None']]} />
+                <KV rows={[['Status', agentState({ ...dto, integration_status: integration.data.status }).label], ['Last success', integration.data.last_success_at ? dateTime(integration.data.last_success_at) : 'Never'], ['API key', integration.data.has_key ? `${integration.data.key_prefix}••••` : 'None']]} />
+                <Field className="mt-4" label="Webhook URL" hint="Changing it means passing the test event again before the agent takes orders.">
+                  <div className="flex gap-2">
+                    <Input icon={<Webhook />} value={hook ?? integration.data.webhook_url ?? 'https://'} onChange={(e) => setHook(e.target.value)} />
+                    <Button variant="outline" loading={busy} disabled={hook === null || !/^https:\/\/.+\..+/.test(hook)} onClick={() => saveHook(hook!)}>Save</Button>
+                  </div>
+                </Field>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" icon={<KeyRound className="size-3.5" />} loading={busy} onClick={() => act(async () => setNewKey((await api.post<{ api_key: string }>(`/agents/${dto.id}/integration/key`)).api_key), 'New key created', 'The old key stops working now.', integration.reload)}>{integration.data.has_key ? 'Rotate key' : 'Create key'}</Button>
-                  <Button size="sm" variant="outline" icon={<Send className="size-3.5" />} loading={busy} onClick={() => act(() => api.post(`/agents/${dto.id}/integration/test`), 'Test event sent', undefined, integration.reload)}>Send test event</Button>
+                  <Button size="sm" variant="outline" icon={<KeyRound className="size-3.5" />} loading={busy} onClick={() => act(async () => setNewKey((await api.post<{ api_key: string }>(`/agents/${dto.id}/integration/key`)).api_key), 'New key created', integration.data!.has_key ? 'The old key stops working now.' : undefined, integration.reload)}>{integration.data.has_key ? 'Rotate key' : 'Create key'}</Button>
+                  {integration.data.has_key && <Button size="sm" variant="ghost" className="text-danger" icon={<Trash2 className="size-3.5" />} loading={busy} onClick={() => act(() => api.del(`/agents/${dto.id}/integration/key`), 'Key revoked', 'Every call with it now fails. Create a new key to reconnect.', integration.reload)}>Revoke key</Button>}
+                  <Button size="sm" variant="outline" icon={<Send className="size-3.5" />} loading={busy} disabled={!integration.data.webhook_url || !integration.data.has_key} onClick={() => act(() => api.post(`/agents/${dto.id}/integration/test`), 'Your agent answered correctly', 'It can take orders now.', () => { integration.reload(); agents.reload() })}>Send test event</Button>
                 </div>
               </Card>
               {integration.data.failing_since ? <Callout tone="danger" icon={<AlertTriangle />} title={`Webhook failing since ${dateTime(integration.data.failing_since)}`}>If it keeps failing for 24 hours, the agent is paused automatically and we email you. Failed deliveries retry 3 times over 15 minutes.</Callout>
+                : integration.data.status === 'pending_test' ? <Callout tone="warn" icon={<AlertTriangle />} title="Needs webhook test">Set the webhook and an API key, then send a test event. Until your agent answers it correctly, it doesn’t take orders.</Callout>
                 : <Callout tone="neutral" icon={<AlertTriangle />} title="Auto-pause">If your webhook fails for 24 hours, the agent is paused automatically and we email you.</Callout>}
             </div>
           )
         )}
         {tab === 'settings' && (
           <div className="max-w-2xl space-y-6">
-            <Card className="p-5">
-              <Field label="Description"><Textarea value={edit?.description ?? dto.description} onChange={(e) => setEdit({ description: e.target.value, cap: edit?.cap ?? dto.free_tag_daily_cap })} /></Field>
-              <Field className="mt-4" label="Daily free-tag cap"><Input type="number" min={0} value={edit?.cap ?? dto.free_tag_daily_cap} onChange={(e) => setEdit({ description: edit?.description ?? dto.description, cap: +e.target.value })} /></Field>
-              <Button className="mt-4" disabled={!edit} loading={busy} onClick={() => act(() => api.patch(`/agents/${dto.id}`, { description: edit!.description, free_tag_daily_cap: edit!.cap }), 'Agent updated', undefined, () => { setEdit(null); agents.reload() })}>Save</Button>
+            <Card className="space-y-4 p-5">
+              <Field label="Name"><Input value={current.name} maxLength={80} onChange={(e) => change({ name: e.target.value })} /></Field>
+              <Field label="Description"><Textarea value={current.description} onChange={(e) => change({ description: e.target.value })} /></Field>
+              <div><div className="mb-2 text-[13px] font-semibold text-ink">Skills</div><div className="flex flex-wrap gap-2">{skillChoices.map((s) => <Chip key={s} active={current.skills.includes(s)} onClick={() => change({ skills: current.skills.includes(s) ? current.skills.filter((y) => y !== s) : [...current.skills, s] })}>{cap(s)}</Chip>)}</div></div>
+              <div><div className="mb-2 text-[13px] font-semibold text-ink">Task rates</div><RatesEditor rates={current.rates} onChange={(rates) => change({ rates })} /></div>
+              <Field label="Daily free-tag cap"><Input type="number" min={0} value={current.cap} onChange={(e) => change({ cap: +e.target.value })} /></Field>
+              <div className="flex gap-2">
+                <Button disabled={!edit || current.name.trim().length < 2 || !Object.keys(ratesBody(current.rates)).length} loading={busy} onClick={save}>Save</Button>
+                {edit && <Button variant="ghost" onClick={() => setEdit(null)}>Discard</Button>}
+              </div>
             </Card>
             <Card className={cn('flex flex-wrap items-center gap-4 border border-danger/20 p-5')}>
               <Trash2 className="size-5 text-danger" />
-              <div className="flex-1"><div className="font-bold text-ink">Delete agent</div><div className="text-[13px] text-ink-2">Only the owner can delete an agent. Open paid orders block deletion.</div></div>
+              <div className="flex-1"><div className="font-bold text-ink">Delete agent</div><div className="text-[13px] text-ink-2">Only the owner can delete an agent. Open paid orders, including disputed ones, block deletion.</div></div>
               <Button variant="danger" onClick={() => setDel(true)}>Delete</Button>
             </Card>
           </div>
         )}
       </div>
       <Modal open={del} onClose={() => setDel(false)} size="sm" title={openOrders ? 'Can’t delete yet' : `Delete ${dto.name}?`}
-        footer={openOrders ? <Button onClick={() => { setDel(false); setTab('orders') }}>See open orders</Button> : <Button variant="danger" loading={busy} onClick={() => act(() => api.del(`/agents/${dto.id}`), 'Agent deleted', 'Tags now show “This agent is no longer available”.', () => nav('/app/agents'))}>Delete agent</Button>}>
-        {openOrders ? <Callout tone="danger" icon={<Bot />}>{dto.name} has {openOrders} open paid {openOrders === 1 ? 'order' : 'orders'}. Finish or refund them first.</Callout> : <p className="text-[14px] text-ink-2">Tags will show “This agent is no longer available”.</p>}
+        footer={openOrders ? <Button onClick={() => { setDel(false); setTab('orders') }}>See open orders</Button> : <Button variant="danger" loading={busy} onClick={remove}>Delete agent</Button>}>
+        {openOrders ? <Callout tone="danger" icon={<Bot />}>{dto.name} has {openOrders} open paid {openOrders === 1 ? 'order' : 'orders'} (received, delivered or disputed). Finish or refund them first.</Callout> : <p className="text-[14px] text-ink-2">Tags will show “This agent is no longer available”.</p>}
       </Modal>
-      <Modal open={!!newKey} onClose={() => setNewKey(null)} title="Your new agent API key" subtitle="Shown once. The old key has stopped working." footer={<Button onClick={() => setNewKey(null)}>Done</Button>}>
+      <Modal open={!!newKey} onClose={() => setNewKey(null)} title="Your new agent API key" subtitle="Shown once. Any older key has stopped working." footer={<Button onClick={() => setNewKey(null)}>Done</Button>}>
         <div className="flex items-center gap-2 rounded-2xl bg-surface-2 p-3 font-mono text-[13px]"><span className="flex-1 break-all">{newKey}</span><button onClick={() => { void navigator.clipboard?.writeText(newKey ?? ''); toast('Copied') }} aria-label="Copy" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-wash"><Copy className="size-4" /></button></div>
+      </Modal>
+      <Modal open={!!newSecret} onClose={() => setNewSecret(null)} title="Webhook signing secret" subtitle="Shown once. Your agent uses it to check events really come from Wamiwa." footer={<Button onClick={() => setNewSecret(null)}>Done</Button>}>
+        <div className="flex items-center gap-2 rounded-2xl bg-surface-2 p-3 font-mono text-[13px]"><span className="flex-1 break-all">{newSecret}</span><button onClick={() => { void navigator.clipboard?.writeText(newSecret ?? ''); toast('Copied') }} aria-label="Copy" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-wash"><Copy className="size-4" /></button></div>
       </Modal>
     </div>
   )

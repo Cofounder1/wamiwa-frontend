@@ -1,30 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, Camera, ChevronRight, Download, FileUp, HelpCircle, KeyRound, Lock, Plus, Search, Send, ShieldCheck, Ticket, Trash2 } from 'lucide-react'
-import { api, errMsg } from '@/api/client'
-import { useApi } from '@/api/hooks'
+import { AlertTriangle, Camera, Check, ChevronRight, Download, FileUp, HelpCircle, ImagePlus, KeyRound, Lock, Paperclip, Phone, Plus, Search, Send, ShieldCheck, Ticket, Trash2, X } from 'lucide-react'
+import { api, ApiError, errMsg } from '@/api/client'
+import { useApi, usePaged } from '@/api/hooks'
 import { useSession } from '@/context/session'
-import { date, dateTime } from '@/lib/format'
+import { date, dateTime, naira, usd } from '@/lib/format'
 import { NICHES } from '@/lib/rules'
 import { cn } from '@/lib/cn'
 import { Avatar, Badge, Button, Callout, Card, CardHeader, Field, Input, Modal, PageHeader, Segmented, Select, Switch, Tabs, Textarea, toast } from '@/components/ui/primitives'
-import { ErrorState, Spinner } from '@/components/ui/states'
+import { ErrorState, LoadMore, Spinner } from '@/components/ui/states'
 import { OtpInput } from '@/pages/auth/Signup'
 import { RegionSelect } from '@/components/ui/RegionPicker'
 
-type Tab = 'profile' | 'media' | 'notifications' | 'privacy' | 'blocked' | 'delete'
+type Tab = 'profile' | 'media' | 'notifications' | 'privacy' | 'payments' | 'blocked' | 'delete'
 export default function Settings() {
   const [params] = useSearchParams()
   const [tab, setTab] = useState<Tab>((params.get('tab') as Tab) ?? 'profile')
+  // Links such as ?tab=payments (sidebar) or ?tab=privacy (phone, two-factor) switch tabs while already on this page.
+  useEffect(() => { const t = params.get('tab') as Tab | null; if (t) setTab(t) }, [params])
   return (
     <div className="max-w-3xl">
       <PageHeader title="Settings" />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'profile', label: 'Profile' }, { value: 'media', label: 'Feed & videos' }, { value: 'notifications', label: 'Notifications' }, { value: 'privacy', label: 'Privacy & security' }, { value: 'blocked', label: 'Blocked' }, { value: 'delete', label: 'Delete account' }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'profile', label: 'Profile' }, { value: 'media', label: 'Feed & videos' }, { value: 'notifications', label: 'Notifications' }, { value: 'privacy', label: 'Privacy & security' }, { value: 'payments', label: 'Payments' }, { value: 'blocked', label: 'Blocked' }, { value: 'delete', label: 'Delete account' }]} />
       <div className="mt-6">
         {tab === 'profile' && <ProfileTab />}
         {tab === 'media' && <MediaTab />}
         {tab === 'notifications' && <NotificationsTab />}
         {tab === 'privacy' && <PrivacyTab />}
+        {tab === 'payments' && <PaymentsTab />}
         {tab === 'blocked' && <BlockedTab />}
         {tab === 'delete' && <DeleteTab />}
       </div>
@@ -82,14 +85,32 @@ function ProfileTab() {
   )
 }
 
-const OPTIONAL = [['like', 'Likes'], ['comment', 'Comments'], ['profile_view', 'Profile views', 'e.g. “A company in Beauty viewed your likeness page”'], ['post_idea', 'Post ideas'], ['follow', 'New followers']] as const
+const OPTIONAL = [['like', 'Likes'], ['comment', 'Comments'], ['message', 'Messages', 'New chats and replies'], ['profile_view', 'Profile views', 'e.g. “A company in Beauty viewed your likeness page”'], ['post_ideas', 'Post ideas'], ['follow', 'New followers']] as const
+
+/** GET /accounts/me now carries these on the profile; declared here until the shared MeDto type has them. */
+type NotifyProfile = { notification_prefs?: Record<string, boolean>; daily_digest?: boolean }
+interface PrefsDto { optional: Record<string, boolean>; daily_digest: boolean; always_on: string[] }
 
 function NotificationsTab() {
-  const [prefs, setPrefs] = useState<Record<string, boolean>>({ like: true, comment: true, profile_view: true, post_idea: true, follow: true })
-  const [digest, setDigest] = useState(false)
+  const { meDto, refreshMe } = useSession()
+  const saved = meDto?.profile as NotifyProfile | undefined
+  const [prefs, setPrefs] = useState<Record<string, boolean>>(() => ({ like: true, comment: true, message: true, profile_view: true, post_ideas: true, follow: true, ...saved?.notification_prefs }))
+  const [digest, setDigest] = useState(saved?.daily_digest ?? false)
+  // Take the saved values once they've loaded, but don't overwrite toggles made since.
+  const inited = useRef(!!saved?.notification_prefs)
+  useEffect(() => {
+    if (inited.current || !saved?.notification_prefs) return
+    inited.current = true
+    setPrefs((p) => ({ ...p, ...saved.notification_prefs })); setDigest(saved.daily_digest ?? false)
+  }, [saved])
   const save = async (next: Record<string, boolean>, d: boolean) => {
-    setPrefs(next); setDigest(d)
-    try { await api.put('/notifications/preferences', { preferences: next, daily_digest: d }) } catch (e) { toast('Couldn’t save', errMsg(e), 'danger') }
+    const before = { prefs, digest }
+    setPrefs(next); setDigest(d); inited.current = true
+    try {
+      const r = await api.put<PrefsDto>('/notifications/preferences', { preferences: next, daily_digest: d })
+      setPrefs((p) => ({ ...p, ...r.optional })); setDigest(r.daily_digest)
+      void refreshMe() // keep the session's copy current for the next visit
+    } catch (e) { setPrefs(before.prefs); setDigest(before.digest); toast('Couldn’t save', errMsg(e), 'danger') }
   }
   return (
     <div className="space-y-6">
@@ -99,7 +120,7 @@ function NotificationsTab() {
         <div className="flex flex-wrap gap-2">{['Payments', 'Contracts', 'Disputes', 'Security', 'Legal'].map((t) => <Badge key={t} tone="neutral" icon={<Lock className="size-3" />}>{t}</Badge>)}</div>
       </Card>
       <Card className="divide-y divide-line px-5">
-        {OPTIONAL.map(([k, label, desc]) => <Switch key={k} checked={prefs[k]} onChange={(v) => save({ ...prefs, [k]: v }, digest)} label={label} description={desc} />)}
+        {OPTIONAL.map(([k, label, desc]) => <Switch key={k} checked={prefs[k] ?? true} onChange={(v) => save({ ...prefs, [k]: v }, digest)} label={label} description={desc} />)}
         <Switch checked={digest} onChange={(v) => save(prefs, v)} label="Daily digest instead" description="One summary email a day for the optional types above." />
       </Card>
     </div>
@@ -157,6 +178,7 @@ function PrivacyTab() {
         <Switch checked={receipts} onChange={(v) => { setReceipts(v); void patch({ read_receipts: v }) }} label="Read receipts" />
         <Switch checked={typing} onChange={(v) => { setTyping(v); void patch({ typing_indicators: v }) }} label="Typing indicators" />
       </Card>
+      <PhoneCard />
       <Card className="flex flex-wrap items-center gap-4 p-5">
         <KeyRound className="size-5 text-brand" />
         <div className="flex-1"><div className="font-bold text-ink">Two-factor login</div><div className="text-[13px] text-ink-2">{enabled ? 'On. You’ll be asked for a code from your authenticator app.' : 'Required to change payout details.'}</div></div>
@@ -168,13 +190,104 @@ function PrivacyTab() {
         <Button variant="outline" onClick={exportData}>Download</Button>
       </Card>
       <Modal open={!!twofa} onClose={() => setTwofa(null)} size="sm" title="Set up two-factor login" subtitle="Add this key to an authenticator app, then enter the 6-digit code it shows." footer={<Button loading={busy} disabled={code.length < 6} onClick={() => finish('/auth/2fa/enable')}>Turn on</Button>}>
-        <div className="rounded-2xl bg-surface-2 p-4 text-center font-mono text-[15px] font-bold tracking-wider break-all text-ink">{twofa?.secret}</div>
+        <div className="rounded-2xl bg-surface-2 p-4 text-center font-mono text-[15px] font-bold tracking-wider break-all text-ink select-all">{twofa?.secret}</div>
+        {twofa?.otpauth_url && <p className="mt-2 text-center text-[12.5px] text-ink-2">On your phone? <a href={twofa.otpauth_url} className="link">Open in authenticator app</a></p>}
         <div className="mt-4"><OtpInput value={code} onChange={setCode} /></div>
       </Modal>
       <Modal open={disabling} onClose={() => setDisabling(false)} size="sm" title="Turn off two-factor login" subtitle="Enter a code from your authenticator app." footer={<Button variant="danger" loading={busy} disabled={code.length < 6} onClick={() => finish('/auth/2fa/disable')}>Turn off</Button>}>
         <OtpInput value={code} onChange={setCode} />
       </Modal>
     </div>
+  )
+}
+
+/** ON-04: a phone number is used for payouts, recovery and guardian confirmation calls once verified by SMS. */
+function PhoneCard() {
+  const { meDto, refreshMe } = useSession()
+  const [editing, setEditing] = useState(false)
+  const [phone, setPhone] = useState('')
+  const [sent, setSent] = useState(false)
+  const [code, setCode] = useState('')
+  const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+  const verified = !!meDto?.phone && meDto.phone_verified
+  const open = editing || !verified
+  const reset = () => { setEditing(false); setSent(false); setPhone(''); setCode(''); setError(undefined) }
+  const send = async () => {
+    setBusy(true); setError(undefined)
+    try { await api.post('/accounts/me/phone', { phone: phone.replace(/[\s()-]/g, '') }); setSent(true); setCode('') } catch (e) { setError(errMsg(e)) } finally { setBusy(false) }
+  }
+  const verify = async () => {
+    setBusy(true); setError(undefined)
+    try {
+      await api.post('/accounts/me/phone/verify', { code })
+      toast('Phone verified'); reset(); void refreshMe()
+    } catch (e) {
+      setCode('')
+      if (e instanceof ApiError && e.code === 'otp_incorrect') setError(`That code isn’t right.${typeof e.details.attempts_left === 'number' ? ` ${e.details.attempts_left} tries left.` : ''}`)
+      else if (e instanceof ApiError && (e.code === 'otp_expired' || e.code === 'no_pending_phone')) { setError('That code has expired. Send a new one.'); setSent(false) }
+      else if (e instanceof ApiError && e.code === 'otp_locked') setError('Too many wrong codes. Wait 15 minutes, then send a new code.')
+      else setError(errMsg(e))
+    } finally { setBusy(false) }
+  }
+  return (
+    <Card id="phone" className="p-5">
+      <div className="flex flex-wrap items-center gap-4">
+        <Phone className="size-5 text-brand" />
+        <div className="flex-1">
+          <div className="font-bold text-ink">Phone number</div>
+          <div className="text-[13px] text-ink-2">{verified ? <>{meDto!.phone} <Badge tone="success" icon={<Check className="size-3" />}>Verified</Badge></> : 'Needed for payouts, account recovery and guardian confirmation calls.'}</div>
+        </div>
+        {verified && !editing && <Button variant="outline" onClick={() => setEditing(true)}>Change</Button>}
+        {verified && editing && <Button variant="ghost" icon={<X className="size-4" />} onClick={reset}>Cancel</Button>}
+      </div>
+      {open && (
+        <div className="mt-4 space-y-3">
+          {!sent ? (
+            <div className="flex flex-wrap gap-2">
+              <div className="min-w-56 flex-1"><Input type="tel" inputMode="tel" autoComplete="tel" placeholder="+234 801 234 5678" maxLength={20} value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
+              <Button loading={busy} disabled={phone.replace(/\D/g, '').length < 7} onClick={send}>Send SMS code</Button>
+            </div>
+          ) : (
+            <>
+              <div className="text-[13px] text-ink-2">Enter the 6-digit code we texted to {phone}. <button type="button" className="link" onClick={() => { setSent(false); setError(undefined) }}>Change number</button></div>
+              <OtpInput value={code} onChange={setCode} />
+              <div className="flex gap-2"><Button loading={busy} disabled={code.length < 6} onClick={verify}>Verify phone</Button><Button variant="ghost" disabled={busy} onClick={send}>Send a new code</Button></div>
+            </>
+          )}
+          {error && <Callout tone="danger">{error}</Callout>}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+interface PaymentDto { id: string; purpose: string; amount_cents: number; amount_local: number; currency: string; status: string; refunded_local: number; created_at: string }
+const PURPOSE: Record<string, string> = {
+  escrow: 'Escrow for a hire', subscription: 'Subscription', ai_video: 'AI video', ai_video_plan: 'AI video plan', video_production: 'Video production',
+  video_plan: 'Video plan', extra_render: 'Extra final render', arcon_filing: 'ARCON filing', promotion: 'Wamiwa Agent', equity_fee: 'Equity deal fee',
+}
+
+/** Everything this account has paid for, with refunds (GET /payments works for every account type). */
+function PaymentsTab() {
+  const list = usePaged((cursor, signal) => api.page<PaymentDto>('/payments', { cursor, limit: 25 }, signal), (p: PaymentDto) => p, [])
+  if (list.error) return <ErrorState error={list.error} onRetry={list.reload} />
+  if (list.loading && !list.items.length) return <Spinner />
+  return (
+    <Card>
+      <CardHeader title="Payments & refunds" subtitle="Charged in Naira at the day’s rate. Escrow for each hire is shown on the contract." />
+      <ul className="mt-2 divide-y divide-line">
+        {list.items.map((p) => (
+          <li key={p.id} className="flex flex-wrap items-center gap-3 px-5 py-3.5 text-[13.5px]">
+            <div className="min-w-0 flex-1"><div className="font-semibold text-ink">{PURPOSE[p.purpose] ?? p.purpose.replace(/_/g, ' ')}</div><div className="text-[12px] text-ink-3">{date(p.created_at)}</div></div>
+            <div className="text-right"><div className="font-bold text-ink num">{naira(p.amount_local)}</div><div className="text-[12px] text-ink-3 num">{usd(p.amount_cents / 100)}</div></div>
+            <Badge tone={p.refunded_local ? 'warn' : p.status === 'succeeded' ? 'success' : 'neutral'}>{p.refunded_local ? `Refunded ${naira(p.refunded_local)}` : p.status.replace(/_/g, ' ')}</Badge>
+          </li>
+        ))}
+        {list.items.length === 0 && <li className="px-5 py-10 text-center text-[13.5px] text-ink-2">No payments yet.</li>}
+      </ul>
+      <div className="pb-4"><LoadMore show={list.hasMore} loading={list.loadingMore} onClick={() => void list.more()} /></div>
+    </Card>
   )
 }
 
@@ -195,7 +308,7 @@ function BlockedTab() {
   )
 }
 
-interface Deletion { blockers: { code: string; message: string }[]; status: string; delete_after?: string | null }
+interface Deletion { blockers: { code: string; message: string }[]; status: string; delete_on?: string | null }
 
 function DeleteTab() {
   const res = useApi((s) => api.get<Deletion>('/accounts/me/deletion', undefined, s), [])
@@ -212,7 +325,7 @@ function DeleteTab() {
   return (
     <div className="space-y-6">
       {scheduled ? (
-        <Callout tone="warn" icon={<AlertTriangle />} title={`Account will be deleted${d.delete_after ? ` on ${date(d.delete_after)}` : ' in 30 days'}`} action={<Button size="sm" variant="outline" loading={busy} onClick={() => run(() => api.del('/accounts/me/deletion'), 'Deletion cancelled')}>Cancel deletion</Button>}>You can cancel any time during the 30-day grace period.</Callout>
+        <Callout tone="warn" icon={<AlertTriangle />} title={`Account will be deleted${d.delete_on ? ` on ${date(d.delete_on)}` : ' in 30 days'}`} action={<Button size="sm" variant="outline" loading={busy} onClick={() => run(() => api.del('/accounts/me/deletion'), 'Deletion cancelled')}>Cancel deletion</Button>}>You can cancel any time during the 30-day grace period.</Callout>
       ) : (
         <Card className="p-6">
           <h3 className="text-[16px] font-bold text-ink">Delete my account</h3>
@@ -235,7 +348,9 @@ function DeleteTab() {
 
 /* ── SP-01 / SP-02 Support ──────────────────────────────────────────────── */
 
-interface TicketDto { id: string; number: string; category: string; subject: string; status: string; first_response_due_at: string; created_at: string; messages?: { from_staff: boolean; body: string; at: string }[] }
+const ticketStatus = (s: string) => (s === 'waiting_on_me' ? 'waiting on you' : s.replace(/_/g, ' '))
+
+interface TicketDto { id: string; number: string; category: string; subject: string; status: string; first_response_due_at: string; created_at: string; messages?: { from_staff: boolean; body: string; attachments?: string[]; at: string }[] }
 const CATEGORIES = [['account', 'Account'], ['payments', 'Payments'], ['contracts', 'Contracts'], ['verification', 'Verification'], ['report_a_problem', 'Report a problem'], ['other', 'Other']] as const
 
 export function Support() {
@@ -285,7 +400,7 @@ export function Support() {
               {(tickets.data?.data ?? []).map((t) => (
                 <li key={t.id}>
                   <button onClick={() => setView(t.id)} className="w-full rounded-2xl border border-line p-3 text-left hover:bg-surface-2">
-                    <div className="flex items-center justify-between"><span className="font-mono text-[12px] text-ink-3">{t.number}</span><Badge tone={t.status === 'resolved' ? 'success' : t.status === 'waiting_on_you' ? 'warn' : 'brand'}>{t.status.replace(/_/g, ' ')}</Badge></div>
+                    <div className="flex items-center justify-between"><span className="font-mono text-[12px] text-ink-3">{t.number}</span><Badge tone={t.status === 'resolved' ? 'success' : t.status === 'waiting_on_me' ? 'warn' : 'brand'}>{ticketStatus(t.status)}</Badge></div>
                     <div className="mt-1 text-[14px] font-bold text-ink">{t.subject}</div>
                     <div className="text-[12px] text-ink-2">{CATEGORIES.find(([c]) => c === t.category)?.[1]} · {date(t.created_at)}</div>
                   </button>
@@ -313,11 +428,23 @@ export function Support() {
 function TicketView({ id, onClose }: { id: string; onClose: () => void }) {
   const t = useApi((s) => api.get<TicketDto>(`/support/tickets/${id}`, undefined, s), [id])
   const [reply, setReply] = useState('')
+  const [files, setFiles] = useState<File[]>([])
+  const [busy, setBusy] = useState(false)
   const send = async () => {
-    try { await api.post(`/support/tickets/${id}/replies`, { body: reply, attachments: [] }); setReply(''); t.reload() } catch (e) { toast('Not sent', errMsg(e), 'danger') }
+    if (!reply.trim() || busy) return
+    setBusy(true)
+    try {
+      // Screenshots are uploaded first; the reply carries their refs (up to 5).
+      const attachments = await Promise.all(files.map(async (f) => {
+        const form = new FormData(); form.append('kind', 'image'); form.append('file', f)
+        return (await api.upload<{ ref: string }>('/uploads', form)).ref
+      }))
+      await api.post(`/support/tickets/${id}/replies`, { body: reply, attachments })
+      setReply(''); setFiles([]); t.reload()
+    } catch (e) { toast('Not sent', errMsg(e), 'danger') } finally { setBusy(false) }
   }
   return (
-    <Modal open onClose={onClose} title={t.data?.subject ?? 'Ticket'} subtitle={t.data ? `${t.data.number} · ${t.data.status.replace(/_/g, ' ')}` : undefined}>
+    <Modal open onClose={onClose} title={t.data?.subject ?? 'Ticket'} subtitle={t.data ? `${t.data.number} · ${ticketStatus(t.data.status)}` : undefined}>
       {!t.data ? <Spinner className="min-h-32" /> : (
         <>
           <div className="space-y-3">
@@ -325,11 +452,26 @@ function TicketView({ id, onClose }: { id: string; onClose: () => void }) {
               <div key={i} className={cn('rounded-2xl p-3 text-[14px]', m.from_staff ? 'bg-brand-soft text-ink' : 'bg-surface-2 text-ink')}>
                 <div className="mb-1 text-[11.5px] font-bold text-ink-2">{m.from_staff ? 'Wamiwa support' : 'You'} · {dateTime(m.at)}</div>
                 <span className="whitespace-pre-wrap">{m.body}</span>
+                {!!m.attachments?.length && <div className="mt-1.5 flex items-center gap-1 text-[12px] text-ink-2"><Paperclip className="size-3.5" />{m.attachments.length} {m.attachments.length === 1 ? 'screenshot' : 'screenshots'} attached</div>}
               </div>
             ))}
           </div>
           {t.data.status !== 'resolved' && (
-            <div className="mt-4 flex gap-2"><input value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && reply && send()} className="h-10 flex-1 rounded-full border border-line px-4 text-[14px] focus:border-brand focus:outline-none" placeholder="Reply…" /><button onClick={send} disabled={!reply} className="grid size-10 place-items-center rounded-full bg-brand text-on-brand disabled:opacity-40" aria-label="Send"><Send className="size-4" /></button></div>
+            <div className="mt-4">
+              {files.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {files.map((f, i) => <span key={i} className="inline-flex items-center gap-1 rounded-full bg-surface-2 py-1 pr-1 pl-2.5 text-[12px] text-ink-2">{f.name}<button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((x) => x.filter((_, j) => j !== i))} className="grid size-5 place-items-center rounded-full hover:bg-wash"><X className="size-3" /></button></span>)}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <label className={cn('grid size-10 shrink-0 cursor-pointer place-items-center rounded-full border border-line text-ink-2 hover:bg-wash', files.length >= 5 && 'pointer-events-none opacity-40')} aria-label="Attach screenshots" title="Attach screenshots (up to 5)">
+                  <ImagePlus className="size-4" />
+                  <input type="file" accept="image/*" multiple className="sr-only" onChange={(e) => { const picked = Array.from(e.target.files ?? []); setFiles((x) => [...x, ...picked].slice(0, 5)); e.target.value = '' }} />
+                </label>
+                <input value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && reply && send()} className="h-10 flex-1 rounded-full border border-line px-4 text-[14px] focus:border-brand focus:outline-none" placeholder="Reply…" />
+                <button onClick={send} disabled={!reply.trim() || busy} className="grid size-10 place-items-center rounded-full bg-brand text-on-brand disabled:opacity-40" aria-label="Send"><Send className="size-4" /></button>
+              </div>
+            </div>
           )}
         </>
       )}

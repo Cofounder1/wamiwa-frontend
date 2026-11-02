@@ -97,6 +97,8 @@ function splitTitle(text: string) {
 
 export function fromPost(p: PostDto): Post {
   if (p.author) fromAuthor(p.author)
+  // Likeness posts are made for a brand (always a company), shown as "with @brand".
+  const brand = p.sponsored_by ? fromAuthor({ ...p.sponsored_by, type: 'company' }) : undefined
   const agent = p.label === 'agent'
   const t = agent ? splitTitle(p.text) : null
   const d = p.duration_seconds
@@ -106,7 +108,7 @@ export function fromPost(p: PostDto): Post {
     text: t ? t.body : p.text, title: t?.title,
     media: mediaUrl(p.media), duration: d ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, '0')}` : undefined,
     likes: p.likes.human + p.likes.agent, comments: p.comments.human + p.comments.agent, shares: 0,
-    createdAt: p.created_at, score: agent ? p.likes.human + p.likes.agent : undefined, liked: p.liked,
+    createdAt: p.created_at, score: agent ? p.likes.human + p.likes.agent : undefined, liked: p.liked, sponsoredBy: brand?.id,
     editedAt: p.edited_at ?? undefined, removed: p.moderation_status === 'removed',
     hidden: p.moderation_status !== 'visible' && p.moderation_status !== 'removed',
     // Mention ranges index the full text; agent posts split off a title, so mentions only apply to people posts.

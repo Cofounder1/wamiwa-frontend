@@ -11,7 +11,9 @@ export default function Login() {
   const [params] = useSearchParams()
   const { login } = useSession()
   const nav = useNavigate()
-  const from = (useLocation().state as { from?: string } | null)?.from
+  // Where to go after logging in: the page that sent you here (state), or a `next` return URL from an emailed link.
+  const nextParam = params.get('next')
+  const from = (useLocation().state as { from?: string } | null)?.from ?? (nextParam?.startsWith('/') && !nextParam.startsWith('//') ? nextParam : undefined)
   const [email, setEmail] = useState(params.get('email') ?? '')
   const [password, setPassword] = useState('')
   const [totp, setTotp] = useState('')
@@ -32,6 +34,8 @@ export default function Login() {
         setEmail(creds.email)
         setPassword(creds.password)
         setNeeds2fa(true)
+      } else if (err instanceof ApiError && err.code === '2fa_setup_required') {
+        setError('Your admin account isn’t ready yet. Open the invite link from your email to set up two-factor login, then log in here.')
       } else setError(err instanceof ApiError ? err.message : 'Something went wrong. Try again.')
     } finally {
       setBusy(false)
@@ -46,6 +50,7 @@ export default function Login() {
             <>
               <Field label="Email"><Input icon={<Mail />} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
               <Field label="Password"><Input icon={<Lock />} type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+              <div className="-mt-2 text-right"><Link to={`/reset-password${email ? `?email=${encodeURIComponent(email)}` : ''}`} className="text-[13px] font-semibold text-ink-2 hover:text-ink">Forgot password?</Link></div>
             </>
           ) : (
             <OtpInput value={totp} onChange={setTotp} />
@@ -77,7 +82,7 @@ export default function Login() {
             <p className="mt-3 text-[11.5px] text-ink-3">Shown in development only. Admin accounts ask for a code from the authenticator secret printed by <code>seed-demo</code>.</p>
           </>
         )}
-        <p className="mt-6 text-center text-[13.5px] text-ink-2">New here? <Link to="/signup" className="link">Create an account</Link></p>
+        <p className="mt-6 text-center text-[13.5px] text-ink-2">New here? <Link to={from?.startsWith('/guardian/accept') ? `/signup?next=${encodeURIComponent(from)}` : '/signup'} className="link">Create an account</Link></p>
       </Pane>
     </AuthFrame>
   )

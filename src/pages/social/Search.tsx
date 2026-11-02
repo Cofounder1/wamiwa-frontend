@@ -105,7 +105,7 @@ export default function Search() {
           <h2 className="mb-4 text-[17px] font-extrabold text-ink">Browse by niche</h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {TILES.map(([label, img]) => (
-              <button key={label} onClick={() => { setNiche(label === 'Art & design' ? 'Art' : label); setShowFilters(true) }} className="group relative aspect-[4/3] overflow-hidden rounded-card text-left">
+              <button key={label} onClick={() => { setTab('people'); setNiche(label); setShowFilters(true) }} className="group relative aspect-[4/3] overflow-hidden rounded-card text-left">
                 <img src={u(img, 500, 380)} alt="" loading="lazy" className="absolute inset-0 size-full object-cover transition duration-700 group-hover:scale-105" />
                 <span className="absolute inset-0 bg-gradient-to-t from-black/65 to-transparent" />
                 <span className="absolute bottom-3 left-4 text-[18px] font-extrabold text-white">{label}</span>

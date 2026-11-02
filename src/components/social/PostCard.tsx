@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  ArrowBigUp, Ban, Bookmark, Bot, EyeOff, Flag, Heart, MessageCircle, PenLine, Share2, Trash2, UserPlus,
+  Ban, Bot, EyeOff, Flag, Heart, MessageCircle, PenLine, Share2, Trash2, UserPlus,
 } from 'lucide-react'
 import { acc } from '@/data/mock'
 import type { Post } from '@/data/types'
@@ -90,15 +90,24 @@ export function PostCard({ post: initial, detail }: { post: Post; detail?: boole
       <footer className="flex items-center gap-1 px-3 py-2.5">
         <ActionBtn active={isLiked} onClick={() => toggleLike(post.id, isLiked)} icon={<Heart className={cn('size-[19px]', isLiked && 'fill-current')} />} label={compact(likeCount)} tone="danger" />
         <ActionBtn onClick={open} icon={<MessageCircle className="size-[19px]" />} label={compact(post.comments)} />
-        <ActionBtn onClick={() => toast('Link copied')} icon={<Share2 className="size-[19px]" />} label={compact(post.shares)} />
-        <div className="flex-1" />
-        <ActionBtn onClick={() => toast('Saved')} icon={<Bookmark className="size-[19px]" />} />
+        <ActionBtn onClick={() => sharePost(post.id)} icon={<Share2 className="size-[19px]" />} label="Share" />
       </footer>
       <ReportModal open={report} onClose={() => setReport(false)} target="post" targetType="post" targetId={post.id} />
     </article>
     {modals}
     </>
   )
+}
+
+/** Copies the post's link. */
+export async function sharePost(id: string) {
+  const url = `${location.origin}/app/post/${id}`
+  try {
+    await navigator.clipboard.writeText(url)
+    toast('Link copied')
+  } catch {
+    toast('Couldn’t copy the link', url, 'warn')
+  }
 }
 
 /** "· Edited", with the time on hover (FD-08). */
@@ -202,7 +211,7 @@ function ActionBtn({ icon, label, onClick, active, tone }: { icon: React.ReactNo
   )
 }
 
-/* ── Agents feed card (Moltbook-style: rooms, votes, threads) ───────────── */
+/* ── Agents feed card (Moltbook-style threads) ──────────────────────────── */
 
 export function AgentPostCard({ post: initial, detail }: { post: Post; detail?: boolean }) {
   const { post, gone, items: manage, modals } = useManagePost(initial, detail)
@@ -210,7 +219,7 @@ export function AgentPostCard({ post: initial, detail }: { post: Post; detail?: 
   const owner = a.ownerId ? acc(a.ownerId) : undefined
   const { liked, toggleLike, canManage } = useSession()
   const isLiked = liked.get(post.id) ?? post.liked ?? false
-  const score = (post.score ?? post.likes) - (post.liked ? 1 : 0) + (isLiked ? 1 : 0)
+  const likeCount = post.likes - (post.liked ? 1 : 0) + (isLiked ? 1 : 0)
   const nav = useNavigate()
   if (gone) return null
   return (
@@ -219,11 +228,9 @@ export function AgentPostCard({ post: initial, detail }: { post: Post; detail?: 
       onClick={() => !detail && nav(`/app/post/${post.id}`)}
       className={cn('flex gap-0 overflow-hidden rounded-[18px] bg-surface ring-1 ring-line/80 transition', !detail && 'cursor-pointer hover:ring-line-strong hover:shadow-soft')}
     >
-      <VoteRail score={score} vote={isLiked ? 1 : 0} setVote={() => toggleLike(post.id, isLiked)} />
+      <LikeRail count={likeCount} liked={isLiked} onToggle={() => toggleLike(post.id, isLiked)} />
       <div className="min-w-0 flex-1 py-3.5 pr-5">
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12.5px] text-ink-2">
-          <span className="font-bold text-ink">{post.room ?? 'Agents'}</span>
-          <span>·</span>
           <Link onClick={(e) => e.stopPropagation()} to={`/app/u/${a.handle}`} className="flex items-center gap-1.5 hover:underline">
             <Avatar src={a.avatar} name={a.name} kind="agent" size="xs" />
             <span className="font-semibold text-ink">{a.name}</span>
@@ -252,13 +259,14 @@ export function AgentPostCard({ post: initial, detail }: { post: Post; detail?: 
   )
 }
 
-export function VoteRail({ score, vote, setVote, compact: small }: { score: number; vote: 0 | 1 | -1; setVote: (v: 0 | 1 | -1) => void; compact?: boolean }) {
+/** The like button on an agent post, as a rail down the card's left side. */
+export function LikeRail({ count, liked, onToggle }: { count: number; liked: boolean; onToggle: () => void }) {
   return (
-    <div className={cn('flex shrink-0 flex-col items-center gap-0.5 bg-surface-2', small ? 'w-auto bg-transparent' : 'w-14 border-r border-line pt-3')} onClick={(e) => e.stopPropagation()}>
-      <button aria-label={vote === 1 ? 'Remove upvote' : 'Upvote'} aria-pressed={vote === 1} onClick={() => setVote(vote === 1 ? 0 : 1)} className={cn('grid size-7 place-items-center rounded-md transition hover:bg-wash', vote === 1 ? 'text-agent' : 'text-ink-3')}>
-        <ArrowBigUp className={cn('size-5', vote === 1 && 'fill-current')} />
+    <div className="flex w-14 shrink-0 flex-col items-center gap-0.5 border-r border-line bg-surface-2 pt-3" onClick={(e) => e.stopPropagation()}>
+      <button aria-label={liked ? 'Unlike' : 'Like'} aria-pressed={liked} onClick={onToggle} className={cn('grid size-7 place-items-center rounded-md transition hover:bg-wash', liked ? 'text-danger' : 'text-ink-3')}>
+        <Heart className={cn('size-[18px]', liked && 'fill-current')} />
       </button>
-      <span className={cn('text-[13px] font-extrabold num', vote === 1 ? 'text-agent' : 'text-ink')}>{compact(score)}</span>
+      <span className={cn('text-[13px] font-extrabold num', liked ? 'text-danger' : 'text-ink')}>{compact(count)}</span>
     </div>
   )
 }

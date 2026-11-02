@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bot, ShieldCheck } from 'lucide-react'
-import { api, errMsg } from '@/api/client'
+import { api, ApiError, errMsg } from '@/api/client'
 import { useApi } from '@/api/hooks'
 import { usd } from '@/lib/format'
 import { cn } from '@/lib/cn'
@@ -13,7 +13,16 @@ import { isCancelled } from '@/api/payments'
 /** MS-05: hire a marketplace agent to summarize this chat, or draw insights from it. */
 interface Offer { id: string; handle: string; name: string; price_cents: number; rating: number | null; completed_orders: number }
 
-export function SummarizeChat({ open, onClose, conversationId }: { open: boolean; onClose: () => void; conversationId: string }) {
+/**
+ * Payment is taken before the order is placed, so the chats the API refuses are caught here first where possible:
+ * an empty chat (`messageCount` 0). Chats with an under-18 (`minor_chat`) can't be known ahead from the API, so a
+ * refusal after paying explains the automatic refund.
+ */
+export function SummarizeChat({ open, onClose, conversationId, messageCount }: {
+  open: boolean; onClose: () => void; conversationId: string
+  /** Messages loaded in the thread; 0 means the chat is empty and can't be summarized. */
+  messageCount?: number
+}) {
   const nav = useNavigate()
   const offers = useApi(open ? (s) => api.get<Offer[]>('/chat-insights/agents', undefined, s) : null, [open])
   const [agentId, setAgentId] = useState<string | null>(null)
@@ -23,23 +32,37 @@ export function SummarizeChat({ open, onClose, conversationId }: { open: boolean
   const chosen = offers.data?.find((o) => o.id === agentId)
   const code = offers.error?.code
 
+  const empty = messageCount === 0
+  const [refused, setRefused] = useState<string>()
+
   const hire = async () => {
-    if (!chosen) return
+    if (!chosen || empty) return
     setBusy(true)
+    let paid = false
     try {
       const payment_method = await pay(chosen.price_cents, `Chat ${kind} by ${chosen.name}`)
+      paid = true
       const order = await api.post<{ id: string }>('/chat-insights', {
         conversation_id: conversationId, agent_id: chosen.id, kind, question: question || null, payment_method })
       toast('Order placed', `${chosen.name} will deliver it in the order thread.`)
       onClose()
       nav(`/app/orders/${order.id}`)
-    } catch (e) { if (!isCancelled(e)) toast('Couldn’t place the order', errMsg(e), 'danger') } finally { setBusy(false) }
+    } catch (e) {
+      if (isCancelled(e)) return
+      const code = e instanceof ApiError ? e.code : undefined
+      if (code === 'minor_chat' || code === 'empty_chat') setRefused(errMsg(e))
+      toast('Couldn’t place the order', paid ? `${errMsg(e)} If you were charged, it is refunded automatically within the hour.` : errMsg(e), 'danger')
+    } finally { setBusy(false) }
   }
 
   return (
     <Modal open={open} onClose={onClose} title="Summarize with an agent" subtitle="Hire a marketplace agent to summarize this chat or tell you what it shows."
-      footer={!offers.error && <Button loading={busy} disabled={!chosen} onClick={hire}>{chosen ? `Hire for ${usd(chosen.price_cents / 100)}` : 'Choose an agent'}</Button>}>
-      {code === 'pro_required' ? (
+      footer={!offers.error && !empty && !refused && <Button loading={busy} disabled={!chosen} onClick={hire}>{chosen ? `Hire for ${usd(chosen.price_cents / 100)}` : 'Choose an agent'}</Button>}>
+      {empty ? (
+        <Callout tone="neutral">This chat has no messages yet, so there’s nothing to summarize.</Callout>
+      ) : refused ? (
+        <Callout tone="warn">{refused} If you were charged, it is refunded automatically within the hour.</Callout>
+      ) : code === 'pro_required' ? (
         <Callout tone="brand" title="Comes with Pro" action={<Button size="sm" to="/app/subscription">See Pro</Button>}>Chat summaries are for Pro subscribers ($16 a month).</Callout>
       ) : code === 'paying_business_required' ? (
         <Callout tone="neutral" title="For paying businesses">Chat summaries are for businesses that paid for a Wamiwa service in the last 90 days.</Callout>

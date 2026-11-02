@@ -8,19 +8,33 @@ import { fromMarketAgent, fromPost } from '@/api/adapt'
 import { useApi, usePaged } from '@/api/hooks'
 import type { ContractDto, MarketAgentDto, PostDto, ProfileDto } from '@/api/types'
 import { useSession } from '@/context/session'
-import { compact, ngn, usd } from '@/lib/format'
+import { compact, naira, usd } from '@/lib/format'
 import { split } from '@/lib/rules'
 import { Avatar, Badge, Button, Callout, Card, Empty, Field, KV, Modal, PageHeader, Textarea, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { AccountLine, VerifiedMark } from '@/components/social/labels'
 import { AgentPostCard } from '@/components/social/PostCard'
 import { pay as takePayment } from '@/components/payments/PaymentSheet'
-import { isCancelled } from '@/api/payments'
+import { isCancelled, paymentMethod } from '@/api/payments'
 
-/** Sandbox card token. Replace with the Korapay checkout token once payments are live. */
+/** POST /contracts/quote: the price, fee and net in US cents, and in Naira at today's rate. */
+interface QuoteDto {
+  usd_cents: { price: number; fee_pct: number; fee: number; net: number }
+  local: { price: number; fee_pct: number; fee: number; net: number; currency: string }
+  fx_rate: string
+}
+
+/** Why the Hire buttons are off, or null when this agent can be hired. */
+function hireBlock(dto: MarketAgentDto & { accepting_orders?: boolean; integration_status?: string }, meId: string): string | null {
+  if (dto.owner?.id === meId) return 'This is your agent. You can’t hire your own agent.'
+  if (dto.paused) return 'Its owner has paused this agent. It isn’t taking orders right now.'
+  if (dto.accepting_orders === false) return 'This agent isn’t taking orders right now. Its owner is still connecting it.'
+  return null
+}
 
 export default function AgentDetail() {
   const { handle = '' } = useParams()
+  const { me } = useSession()
   const [hire, setHire] = useState<{ task: string; cents: number } | null>(null)
   const res = useApi(async (s) => {
     const profile = await api.get<ProfileDto>(`/profiles/${handle}`, undefined, s)
@@ -29,14 +43,18 @@ export default function AgentDetail() {
   const posts = usePaged<PostDto, Post>(res.data ? (cursor, s) => api.page<PostDto>(`/profiles/${handle}/posts`, { cursor, limit: 5 }, s) : null, fromPost, [handle, res.data?.id])
 
   if (res.error) {
-    if (res.error.status === 404) return <Empty icon={<Bot />} title="This agent is no longer available" action={<Button to="/app/marketplace">See similar agents</Button>} />
+    if (res.error.status === 404) {
+      // The backend points at similar agents: `/marketplace/agents?similar_to=<id>`.
+      const similar = new URLSearchParams(String(res.error.details.similar_agents_url ?? '').split('?')[1] ?? '').get('similar_to')
+      return <Empty icon={<Bot />} title="This agent is no longer available" action={<Button to={similar ? `/app/marketplace?similar_to=${encodeURIComponent(similar)}` : '/app/marketplace'}>See similar agents</Button>} />
+    }
     return <ErrorState error={res.error} onRetry={res.reload} />
   }
   if (!res.data) return <Spinner />
   const dto = res.data
   const a = fromMarketAgent(dto)
   const owner = acc(a.ownerId!)
-  const live = dto.status === 'active' && !dto.paused
+  const blockedReason = hireBlock(dto, me.id)
 
   return (
     <div>
@@ -57,13 +75,14 @@ export default function AgentDetail() {
           </div>
 
           <h2 className="mt-10 mb-4 text-[18px] font-extrabold text-ink">What it does</h2>
+          {blockedReason && <Callout tone="neutral" className="mb-4" title="Not taking orders">{blockedReason}</Callout>}
           <div className="grid gap-3 sm:grid-cols-3">
             {Object.entries(dto.rates).map(([task, c]) => (
               <Card key={task} flat className="flex flex-col p-5">
                 <div className="text-[14px] font-bold text-ink first-letter:uppercase">{task}</div>
                 <div className="mt-4 flex items-end justify-between">
                   <span className="text-[24px] font-extrabold text-ink num">{usd(c / 100)}</span>
-                  <Button size="sm" disabled={!live} onClick={() => setHire({ task, cents: c })}>Hire</Button>
+                  <Button size="sm" disabled={!!blockedReason} onClick={() => setHire({ task, cents: c })}>Hire</Button>
                 </div>
               </Card>
             ))}
@@ -106,21 +125,34 @@ function HireModal({ agent, task, cents, onClose }: { agent: MarketAgentDto; tas
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const price = cents / 100
-  const s = split(price, 'agent')
+  const method = useApi(() => paymentMethod(), [])
+  const naijaPayer = method.data?.currency === 'NGN'
+  // The Naira estimate comes from the backend's quote at today's rate; only Naira payers see it.
+  const quote = useApi(naijaPayer ? () => api.post<QuoteDto>('/contracts/quote', { type: 'agent', price_cents: cents }) : null, [naijaPayer, cents])
+  const fallback = split(price, 'agent')
+  const q = quote.data?.usd_cents
+  const s = q ? { fee: q.fee / 100, net: q.net / 100, pct: q.fee_pct } : { fee: fallback.fee, net: fallback.net, pct: Math.round(fallback.pct * 100) }
   const blocked = me.minor || (me.kind === 'company' && me.verification !== 'company')
 
   const pay = async () => {
     setBusy(true)
     setError(undefined)
+    let paid = false
     try {
       const payment_method = await takePayment(cents, `${agent.name} · ${task.replace(/_/g, ' ')} (held in escrow)`)
+      paid = true
       const order = await api.post<ContractDto>(`/marketplace/agents/${agent.id}/orders`, { payment_method, task, brief })
       onClose()
       toast('Order placed', `${usd(price)} is held in escrow until you approve the delivery.`)
       nav(`/app/orders/${order.id}`)
     } catch (e) {
       if (isCancelled(e)) return
-      setError(e instanceof ApiError ? e.fieldMessage ?? e.message : 'Payment failed. Try again.')
+      const code = e instanceof ApiError ? e.code : ''
+      const why = code === 'self_hire' ? 'You can’t hire your own agent.'
+        : code === 'blocked' ? 'You can’t hire this agent.'
+        : code === 'agent_paused' ? 'This agent stopped taking orders just now.'
+        : e instanceof ApiError ? e.fieldMessage ?? e.message : 'Payment failed. Try again.'
+      setError(paid ? `${why} If you were charged, it is refunded automatically within the hour.` : why)
     } finally {
       setBusy(false)
     }
@@ -137,9 +169,9 @@ function HireModal({ agent, task, cents, onClose }: { agent: MarketAgentDto; tas
       <div className="mt-5 rounded-2xl bg-surface-2 p-4">
         <KV rows={[
           ['Price', usd(price, { cents: true })],
-          ['Wamiwa fee (10%, from the price)', usd(s.fee, { cents: true })],
+          [`Wamiwa fee (${s.pct}%, from the price)`, usd(s.fee, { cents: true })],
           ['Agent owner receives', usd(s.net, { cents: true })],
-          ['You pay today', <span key="p">{usd(price, { cents: true })} <span className="font-normal text-ink-3">≈ {ngn(price)}</span></span>],
+          ['You pay today', <span key="p">{usd(price, { cents: true })}{naijaPayer && quote.data && <span className="font-normal text-ink-3"> ≈ {naira(quote.data.local.price)} at today’s rate</span>}</span>],
         ]} />
       </div>
       {error && <Callout className="mt-4" tone="danger">{error}</Callout>}

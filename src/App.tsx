@@ -13,6 +13,9 @@ function lz<M extends Record<string, unknown>>(load: () => Promise<M>, name: key
 
 const Signup = lz(() => import('@/pages/auth/Signup'))
 const Login = lz(() => import('@/pages/auth/Login'))
+const ResetPassword = lz(() => import('@/pages/auth/ResetPassword'))
+const AdminInvite = lz(() => import('@/pages/auth/AdminInvite'))
+const GuardianAccept = lz(() => import('@/pages/guardian/GuardianAccept'))
 const Developers = lz(() => import('@/pages/marketing/Developers'))
 const Terms = lz(() => import('@/pages/legal/Legal'), 'Terms')
 const Privacy = lz(() => import('@/pages/legal/Legal'), 'Privacy')
@@ -93,6 +96,7 @@ const DisputeDetail = lz(AO, 'DisputeDetail')
 const Payouts = lz(AO, 'Payouts')
 const MinorContracts = lz(AO, 'MinorContracts')
 const AdminManagement = lz(AO, 'AdminManagement')
+const GoLive = lz(AO, 'GoLive')
 const AuditLog = lz(AO, 'AuditLog')
 const CategoryMap = lz(AO, 'CategoryMap')
 const Keywords = lz(AO, 'Keywords')
@@ -110,6 +114,10 @@ export default function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          {/* Links emailed by the backend; public, outside the app shell */}
+          <Route path="/guardian/accept" element={<GuardianAccept />} />
+          <Route path="/admin/invite" element={<AdminInvite />} />
           <Route path="/developers" element={<Developers />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
@@ -186,6 +194,7 @@ export default function App() {
             <Route path="minors" element={<MinorContracts />} />
             <Route path="health" element={<QueueHealth />} />
             <Route path="admins" element={<AdminManagement />} />
+            <Route path="go-live" element={<GoLive />} />
             <Route path="audit" element={<AuditLog />} />
             <Route path="feedback" element={<Feedback />} />
             <Route path="category-map" element={<CategoryMap />} />

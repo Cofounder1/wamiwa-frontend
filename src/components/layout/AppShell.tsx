@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Bell, Check, ChevronsUpDown, Loader2, LogOut, Menu as MenuIcon, Monitor, Moon, Plus, Search, Settings, Sun, X } from 'lucide-react'
+import { Bell, Check, ChevronsUpDown, Clock, HeartHandshake, Loader2, LogOut, Menu as MenuIcon, Monitor, Moon, Plus, Search, Settings, ShieldAlert, Snowflake, Sun, Trash2, X } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { date } from '@/lib/format'
 import { DEMO_PASSWORD, HOME, ROLES, useSession } from '@/context/session'
-import { api, ApiError } from '@/api/client'
-import { Avatar, Kbd, toast } from '@/components/ui/primitives'
+import { api, ApiError, errMsg } from '@/api/client'
+import { Avatar, Button, Callout, Input, Kbd, Textarea, toast } from '@/components/ui/primitives'
 import { Logo, LogoMark } from '@/components/ui/Logo'
 import { ADMIN_NAV, NAV, type NavGroup } from './nav'
 import { CommandPalette } from './CommandPalette'
 import { FeedbackPrompt } from './FeedbackPrompt'
+import { TestModeBanner } from '@/components/layout/TestModeBanner'
 
 /** Unread notifications, refreshed on navigation and every minute. */
 function useUnread(enabled: boolean) {
@@ -74,7 +76,9 @@ export function AppShell({ admin }: { admin?: boolean }) {
           <button onClick={() => setPalette(true)} aria-label="Search" className="grid size-10 place-items-center rounded-full hover:bg-wash"><Search className="size-5" /></button>
           {!admin && <Link to="/app/notifications" aria-label="Notifications" className="relative grid size-10 place-items-center rounded-full hover:bg-wash"><Bell className="size-5" /><span className="absolute top-2 right-2.5 size-2 rounded-full bg-brand ring-2 ring-surface" /></Link>}
         </header>
+        <TestModeBanner />
         <main className="mx-auto w-full max-w-[1200px] px-4 pt-6 pb-28 sm:px-6 lg:px-10 lg:pt-10">
+          {!admin && <AccountStateBanner />}
           <Outlet />
         </main>
       </div>
@@ -94,6 +98,20 @@ export function AppShell({ admin }: { admin?: boolean }) {
 
 function Sidebar({ groups, admin, onSearch }: { groups: NavGroup[]; admin?: boolean; onSearch: () => void }) {
   const { role } = useSession()
+  const loc = useLocation()
+  // NavLink only compares paths. Items with a query (e.g. /app/settings?tab=payments) are active when the query
+  // matches, and then the plain item for the same path (Settings) isn't.
+  const queryMatch = (to: string) => {
+    const [path, q] = to.split('?')
+    if (!q || loc.pathname !== path) return false
+    const want = new URLSearchParams(q), have = new URLSearchParams(loc.search)
+    return [...want].every(([k, v]) => have.get(k) === v)
+  }
+  const all = groups.flatMap((g) => g.items)
+  const isActiveItem = (to: string, navActive: boolean) => {
+    if (to.includes('?')) return queryMatch(to)
+    return navActive && !all.some((x) => x.to.startsWith(to + '?') && queryMatch(x.to))
+  }
   return (
     <>
       <div className="flex h-[72px] shrink-0 items-center gap-2 px-5">
@@ -125,20 +143,20 @@ function Sidebar({ groups, admin, onSearch }: { groups: NavGroup[]; admin?: bool
                 key={i.to}
                 to={i.to}
                 end={i.to === '/admin' || i.to === '/app/agents' || i.to === '/app/guardian'}
-                className={({ isActive }) => cn(
+                className={({ isActive: navActive }) => { const isActive = isActiveItem(i.to, navActive); return cn(
                   'group flex h-10 items-center gap-3 rounded-xl px-3 text-[14px] font-semibold transition',
                   admin
                     ? isActive ? 'bg-white/12 text-white' : 'text-white/65 hover:bg-white/6 hover:text-white'
                     : isActive ? 'bg-brand-soft text-ink' : 'text-ink-2 hover:bg-wash hover:text-ink',
-                )}
+                ) }}
               >
-                {({ isActive }) => (
+                {({ isActive: navActive }) => { const isActive = isActiveItem(i.to, navActive); return (
                   <>
                     <i.icon className={cn('size-[18px] shrink-0', isActive && !admin && 'text-brand')} strokeWidth={isActive ? 2.4 : 2} />
                     <span className="flex-1 truncate">{i.label}</span>
                     {i.badge && <span className={cn('rounded-full px-1.5 text-[11px] leading-5 font-bold num', admin ? 'bg-brand text-white' : 'bg-brand text-on-brand')}>{i.badge}</span>}
                   </>
-                )}
+                ) }}
               </NavLink>
             ))}
           </div>
@@ -237,5 +255,103 @@ function RoleSwitcher({ admin }: { admin?: boolean }) {
         <ChevronsUpDown className={cn('size-4', admin ? 'text-white/50' : 'text-ink-3')} />
       </button>
     </div>
+  )
+}
+
+/* ── Account states (ON-02, AD-02, DL-01) ───────────────────────────────── */
+
+/** A compact banner for accounts that aren't fully active: what's going on and the one thing that can be done. */
+function AccountStateBanner() {
+  const { meDto } = useSession()
+  const status = meDto?.status
+  if (!status || status === 'active') return null
+  if (status === 'pending_guardian') return <PendingGuardianBanner />
+  if (status === 'suspended' || status === 'frozen') return <RestrictedBanner status={status} />
+  if (status === 'pending_deletion') return <PendingDeletionBanner />
+  return null
+}
+
+/** Why the account is on hold: GET /accounts/me carries it as status_reason. */
+function useRestrictionReason(enabled: boolean) {
+  const { meDto } = useSession()
+  return enabled ? meDto?.status_reason ?? null : null
+}
+
+function PendingGuardianBanner() {
+  const { refreshMe } = useSession()
+  const [contact, setContact] = useState('')
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const invite = async () => {
+    setBusy(true)
+    try {
+      const r = await api.post<{ sent_to: string }>('/guardians/invite', { contact: contact.trim() })
+      toast('Invite sent', `We sent a new invite to ${r.sent_to}. Older invites no longer work.`); setContact(''); setOpen(false)
+    } catch (e) { toast('Couldn’t send the invite', errMsg(e), 'danger') } finally { setBusy(false) }
+  }
+  return (
+    <Callout className="mb-6" tone="warn" icon={<HeartHandshake />} title="Waiting for your guardian"
+      action={!open && <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void refreshMe()}>Check again</Button><Button size="sm" onClick={() => setOpen(true)}>Send a new invite</Button></div>}>
+      Because you’re under 18, your parent or guardian must accept your invite and verify their ID before your account opens. Until then you can look around, but you can’t post, message or earn.
+      {open && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <div className="min-w-56 flex-1"><Input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Guardian’s email or phone" maxLength={255} /></div>
+          <Button loading={busy} disabled={contact.trim().length < 5} onClick={invite}>Send invite</Button>
+          <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+        </div>
+      )}
+    </Callout>
+  )
+}
+
+function RestrictedBanner({ status }: { status: 'suspended' | 'frozen' }) {
+  const reason = useRestrictionReason(true)
+  const [open, setOpen] = useState(false)
+  const [statement, setStatement] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [sent, setSent] = useState(false)
+  const appeal = async () => {
+    setBusy(true)
+    try { await api.post('/accounts/me/appeal', { statement: statement.trim() }); setSent(true); setOpen(false); toast('Appeal sent', 'Our team reviews it and emails you the result.') }
+    catch (e) { toast('Couldn’t send your appeal', errMsg(e), 'danger') } finally { setBusy(false) }
+  }
+  if (status === 'frozen') {
+    return (
+      <Callout className="mb-6" tone="warn" icon={<Snowflake />} title="Your account is frozen">
+        {reason ? `${reason}. ` : ''}You can look around, but you can’t post, message, accept offers or get paid until it’s unfrozen.{' '}
+        {reason === 'Frozen by guardian' ? 'Talk to your guardian to unfreeze it.' : <>Questions? <Link to="/app/support" className="link">Contact support</Link>.</>}
+      </Callout>
+    )
+  }
+  return (
+    <Callout className="mb-6" tone="danger" icon={<ShieldAlert />} title="Your account is suspended"
+      action={!open && !sent && <Button size="sm" variant="outline" onClick={() => setOpen(true)}>Appeal</Button>}>
+      {reason ? <>Reason: <b className="text-ink">{reason}</b>. </> : ''}You can’t post, message or earn while suspended. You can appeal once, within 14 days.
+      {sent && <div className="mt-2 font-semibold text-ink">Appeal sent. We’ll email you the result.</div>}
+      {open && (
+        <div className="mt-3 space-y-2">
+          <Textarea value={statement} onChange={(e) => setStatement(e.target.value)} maxLength={4000} placeholder="Tell us why the suspension should be lifted (at least 10 characters)" />
+          <div className="flex gap-2"><Button size="sm" loading={busy} disabled={statement.trim().length < 10} onClick={appeal}>Send appeal</Button><Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>
+        </div>
+      )}
+    </Callout>
+  )
+}
+
+function PendingDeletionBanner() {
+  const { refreshMe } = useSession()
+  const [deleteOn, setDeleteOn] = useState<string | null>()
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { api.get<{ delete_on: string | null }>('/accounts/me/deletion').then((d) => setDeleteOn(d.delete_on)).catch(() => setDeleteOn(null)) }, [])
+  const cancel = async () => {
+    setBusy(true)
+    try { await api.del('/accounts/me/deletion'); toast('Deletion cancelled', 'Your account is back to normal.'); await refreshMe() }
+    catch (e) { toast('Couldn’t cancel', errMsg(e), 'danger') } finally { setBusy(false) }
+  }
+  return (
+    <Callout className="mb-6" tone="warn" icon={deleteOn ? <Clock /> : <Trash2 />} title={`Your account will be deleted${deleteOn ? ` on ${date(deleteOn)}` : ' after the 30-day grace period'}`}
+      action={<Button size="sm" variant="outline" loading={busy} onClick={cancel}>Cancel deletion</Button>}>
+      Until then you can’t post, message or earn. Cancel to keep your account.
+    </Callout>
   )
 }

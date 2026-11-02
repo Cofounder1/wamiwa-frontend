@@ -17,7 +17,7 @@ import { ErrorState, LoadMore, RowSkeleton } from '@/components/ui/states'
 import { VerifiedMark, WhoTag } from './labels'
 import { RichText, SuggestedSellersLink } from './sponsored'
 import { ReportModal } from './ReportModal'
-import { Edited, VoteRail } from './PostCard'
+import { Edited } from './PostCard'
 import { Markdown } from '@/components/ui/Markdown'
 
 export function CommentThread({ postId, postAuthorId, variant = 'people', onCountChange }: {
@@ -120,8 +120,12 @@ function CommentNode({ c, childrenOf, postAuthorId, onReply, onDelete, onEdit, v
   // Edit: only comments you typed yourself, for 15 minutes, and not while under review.
   const minutesLeft = c.authorId === me.id && c.label === 'human' && !c.hidden && c.text !== '[deleted]' ? editMinutesLeft(c.createdAt) : 0
 
+  // Only agent replies (including auto-replies and sponsored answers) can be rated, by people other than their
+  // author. A rating can be switched but not taken back, so pressing the chosen one again does nothing.
+  const ratable = !isTag && (c.label === 'agent' || c.label === 'autoreply' || c.label === 'wamiwa') && c.authorId !== me.id && me.kind !== 'agent'
   const rate = async (helpful: boolean) => {
     const prev = rating
+    if (prev === helpful) return
     setRating(helpful)
     try { await api.put(`/comments/${c.id}/rating`, { helpful }) } catch (e) { setRating(prev); toast('Couldn’t save rating', errMsg(e), 'danger') }
   }
@@ -130,7 +134,6 @@ function CommentNode({ c, childrenOf, postAuthorId, onReply, onDelete, onEdit, v
     <div className={cn('relative', depth > 0 && 'mt-1 pl-5 sm:pl-8')}>
       {depth > 0 && <span className="absolute top-0 bottom-3 left-2 w-px bg-line sm:left-3.5" />}
       <div className={cn('group flex gap-3 rounded-2xl py-2.5 pr-2', variant === 'agents' && depth === 0 && 'bg-surface px-3 ring-1 ring-line/70')}>
-        {variant === 'agents' && <VoteRail compact score={c.likes + (rating ? 1 : 0)} vote={rating ? 1 : 0} setVote={(v) => rate(v === 1)} />}
         <Link to={`/app/u/${a.handle}`} className="shrink-0"><Avatar src={a.avatar} name={a.name} kind={a.kind} size="sm" /></Link>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 leading-tight">
@@ -147,7 +150,7 @@ function CommentNode({ c, childrenOf, postAuthorId, onReply, onDelete, onEdit, v
 
           {!isTag && !editing && (
             <div className="mt-1.5 flex items-center gap-1 text-[12px] font-semibold text-ink-3">
-              {a.kind === 'agent' && c.authorId !== me.id && variant === 'people' && (
+              {ratable && (
                 <span className="mr-1 inline-flex items-center gap-0.5">
                   <span className="mr-1">Helpful?</span>
                   <button aria-label="Helpful" aria-pressed={rating === true} onClick={() => rate(true)} className={cn('grid size-7 place-items-center rounded-full hover:bg-wash', rating === true && 'text-success')}><ThumbsUp className="size-3.5" /></button>

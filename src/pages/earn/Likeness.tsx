@@ -11,9 +11,11 @@ import { cn } from '@/lib/cn'
 import { Badge, Button, Callout, Card, CardHeader, Checkbox, Field, Input, Modal, PageHeader, Switch, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 
-interface Guide { type: 'follower_based' | 'major_person' | string; names_own_price: boolean; max_price_cents?: number; recommended_min_cents?: number; recommended_max_cents?: number; note?: string }
+/** GET /likeness/pricing-guide: a follower-based cap, or (verified major people) a recommended [min, max] range. */
+interface Guide { type: 'follower_based' | 'verified_major_person'; names_own_price: boolean; max_price_cents?: number; recommended_range_cents?: [number, number]; note?: string }
 interface Asset { asset_id: string; kind: 'photo' | 'voice'; file: string; duration_seconds: number }
-interface PageDto { price_image_cents?: number; price_voice_cents?: number | null; exclusivity_price_cents?: number | null; voice_available?: boolean }
+/** The public listing (GET /likeness/influencers/{id}); the voice price is `price_image_voice_cents` there. */
+interface PageDto { price_image_cents?: number | null; price_image_voice_cents?: number | null; exclusivity_price_cents?: number | null; voice_available?: boolean }
 
 export default function Likeness() {
   const { me } = useSession()
@@ -33,7 +35,7 @@ export default function Likeness() {
     const p = page.data
     const img = p?.price_image_cents ?? profile.data?.likeness?.price_image_cents
     if (img) setImageOnly(img / 100)
-    if (p?.price_voice_cents) setImageVoice(p.price_voice_cents / 100)
+    if (p?.price_image_voice_cents) setImageVoice(p.price_image_voice_cents / 100)
     if (p?.exclusivity_price_cents) { setExcl(p.exclusivity_price_cents / 100); setExclOn(true) }
   }, [page.data, profile.data])
 
@@ -130,8 +132,8 @@ export default function Likeness() {
         <aside>
           <Card className="p-5 lg:sticky lg:top-10">
             <h3 className="text-[15px] font-bold text-ink">Pricing per month</h3>
-            {guide.data?.names_own_price ? (
-              <Callout className="mt-3" tone="warn" icon={<Crown />}>As a Verified major person you name your own price{guide.data.recommended_min_cents ? `. Recommended: ${usd(guide.data.recommended_min_cents / 100)}–${usd((guide.data.recommended_max_cents ?? 0) / 100)}` : ''}.</Callout>
+            {guide.data?.type === 'verified_major_person' ? (
+              <Callout className="mt-3" tone="warn" icon={<Crown />}>As a Verified major person you name your own price{guide.data.recommended_range_cents ? `. Recommended: ${usd(guide.data.recommended_range_cents[0] / 100)}–${usd(guide.data.recommended_range_cents[1] / 100)}` : ''}.</Callout>
             ) : cap !== undefined && (
               <div className="mt-3 rounded-2xl bg-surface-2 p-4">
                 <div className="flex items-baseline justify-between"><span className="text-[12.5px] text-ink-2">Your image-only limit</span><span className="text-[24px] font-extrabold text-ink num">{usd(cap)}</span></div>

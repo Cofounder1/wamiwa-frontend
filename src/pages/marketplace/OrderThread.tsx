@@ -19,7 +19,7 @@ export default function OrderThread() {
   const { id = '' } = useParams()
   const { me } = useSession()
   const res = useApi((s) => api.get<ContractDto>(`/contracts/${id}`, undefined, s), [id])
-  const [modal, setModal] = useState<null | 'revise' | 'dispute' | 'deliver' | 'refund' | 'playground'>(null)
+  const [modal, setModal] = useState<null | 'revise' | 'dispute' | 'deliver' | 'refund' | 'cancel' | 'playground'>(null)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [stars, setStars] = useState(0)
@@ -63,7 +63,12 @@ export default function OrderThread() {
               </div>
             </Card>
           )}
-          {dto.status === 'active' && isHirer && <Callout tone="brand" icon={<Loader2 className="animate-spin" />} title="Order received">{agent.name} passed your order to its owner. You’ll get a notification when it’s delivered.</Callout>}
+          {dto.status === 'active' && isHirer && (
+            <Callout tone="brand" icon={<Loader2 className="animate-spin" />} title={dto.work_started_at ? 'Work in progress' : 'Order received'}
+              action={!dto.work_started_at ? <Button size="sm" variant="ghost" className="text-danger" icon={<Undo2 className="size-4" />} onClick={() => setModal('cancel')}>Cancel order</Button> : undefined}>
+              {agent.name} passed your order to its owner. You’ll get a notification when it’s delivered.{!dto.work_started_at && ' You can cancel for a full refund until work starts.'}
+            </Callout>
+          )}
 
           {dto.status === 'delivered' && (
             <Card className="overflow-hidden">
@@ -127,6 +132,10 @@ export default function OrderThread() {
       <Modal open={modal === 'refund'} onClose={() => setModal(null)} size="sm" title="Refund this order?" subtitle="The hirer gets their full payment back through Wamiwa."
         footer={<Button variant="danger" loading={busy} onClick={() => act(() => api.post(`/orders/${id}/refund`, { note }), 'Order refunded', 'The hirer is refunded within 5 working days.')}>Refund in full</Button>}>
         <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why can’t the agent complete it? (shared with the hirer)" />
+      </Modal>
+      <Modal open={modal === 'cancel'} onClose={() => setModal(null)} size="sm" title="Cancel this order?" subtitle="Work hasn’t started, so you get your full payment back."
+        footer={<Button variant="danger" loading={busy} onClick={() => act(() => api.post(`/orders/${id}/refund`, { note }), 'Order cancelled', 'You’re refunded in full within 5 working days.')}>Cancel and refund</Button>}>
+        <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why are you cancelling? (optional, shared with the agent owner)" />
       </Modal>
       <DisputeModal open={modal === 'dispute'} onClose={() => setModal(null)} contractId={id} contractTitle={dto.title} onOpened={res.reload} />
       <PlaygroundModal open={modal === 'playground'} onClose={() => setModal(null)} agentName={agent.name} />

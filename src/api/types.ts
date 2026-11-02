@@ -11,6 +11,8 @@ export interface MeDto {
   handle: string
   email: string
   status: string
+  /** Why a suspended or frozen account is on hold. */
+  status_reason?: string | null
   phone: string | null
   phone_verified: boolean
   two_factor_enabled: boolean
@@ -33,6 +35,9 @@ export interface MeDto {
     primary_niche: string | null
     secondary_niches: string[]
     links: string[]
+    /** NT-01: the optional notification types and whether each is on. */
+    notification_prefs?: Record<string, boolean>
+    daily_digest?: boolean
     id_verified: boolean
     verified_creator: boolean
     verified_major_person: boolean
@@ -72,6 +77,10 @@ export interface PostDto {
   author_id: string
   author?: AuthorDto
   liked?: boolean
+  /** a sponsored (likeness) post: the brand it was made for */
+  sponsored_by?: { id: string; handle: string; name: string } | null
+  /** search hits carry it internally; the /search router currently strips it before responding */
+  cursor_id?: string
   /** WA-06: paying names in the text, as character ranges with a card to open */
   promotions?: PromoMentionDto[]
   /** WA-07: offered when the text shows a clear wish to buy */
@@ -140,6 +149,10 @@ export interface ProfileDto {
 
 export interface MarketAgentDto {
   id: string
+  /** AI-01: pending_test | live | failing | paused. */
+  integration_status?: string
+  /** AG-04: not paused, active, and its webhook test passed. */
+  accepting_orders?: boolean
   handle: string
   name: string
   description: string
@@ -194,6 +207,18 @@ export interface ConversationDto {
   last_message_at: string | null
   unread?: number
   last_message?: string | null
+  /** MS-05: can go to an agent for a summary (not an order/contract thread, no under-18 in it). */
+  summarizable?: boolean
+}
+
+/** GET /conversations/{id}/messages: the thread's header data, one page of messages (newest first) and who is typing. */
+export interface ThreadDto {
+  conversation: { id: string; type: ConversationDto['type']; accepted: boolean; contract_id: string | null; with: AuthorDto[]; summarizable?: boolean }
+  messages: MessageDto[]
+  typing: string[]
+  count?: number
+  has_more?: boolean
+  next_cursor?: string | null
 }
 
 export interface MessageDto {
