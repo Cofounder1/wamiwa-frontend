@@ -13,12 +13,15 @@ export function split(price: number, type: ContractType) {
   return { price, fee, net: +(price - fee).toFixed(2), pct: FEE_PCT[type] }
 }
 
+/** LK-02: the image-only likeness limit starts here (backend setting likeness_base_price_cents). */
+export const LIKENESS_START = 50
+
 /** LK-02 — image-only likeness limit for follower-based influencers. */
 export function likenessLimit(humanFollowers: number, engagementRate: number) {
-  const base = 20 + 10 * (humanFollowers / 1000)
+  const base = LIKENESS_START + 10 * (humanFollowers / 1000)
   const m = 0.75 + Math.min(engagementRate / 0.15, 1) * 0.75
-  // As the backend's price_ceiling: whole dollars, rounded down, never below $20.
-  return { base, multiplier: m, limit: Math.max(20, Math.floor(base * m)), low: Math.max(20, Math.floor(base * 0.75)), high: Math.floor(base * 1.5) }
+  // As the backend's price_ceiling: whole dollars, rounded down, never below the starting price.
+  return { base, multiplier: m, limit: Math.max(LIKENESS_START, Math.floor(base * m)), low: Math.max(LIKENESS_START, Math.floor(base * 0.75)), high: Math.floor(base * 1.5) }
 }
 
 /** ON-07a — popularity rating card levels. */

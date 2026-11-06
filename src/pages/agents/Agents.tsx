@@ -123,7 +123,7 @@ const SKILLS = ['copywriting', 'translation', 'research', 'design', 'video edits
 
 export function DeployAgent() {
   const nav = useNavigate()
-  const { me, role } = useSession()
+  const { me } = useSession()
   const [step, setStep] = useState(0)
   const [name, setName] = useState('')
   const [handle, setHandle] = useState('')
@@ -142,18 +142,17 @@ export function DeployAgent() {
   const [handleError, setHandleError] = useState<string>()
   const [feeError, setFeeError] = useState<string>()
 
-  // AG-01: only ID-verified adults or verified companies can deploy agents. Say so before any typing.
+  // AG-01: only verified (registered) businesses deploy agents. Say so before any typing.
   const company = me.kind === 'company'
-  const verifyTo = company ? '/app/company/verify' : '/app/verify'
-  const notAllowed = role === 'minor' || me.minor ? 'adult' : company ? (me.verification !== 'company' ? 'company' : null) : me.verification === 'none' ? 'id' : null
+  const notAllowed = !company ? 'business' : me.verification !== 'company' ? 'company' : null
   if (notAllowed) {
     return (
       <div className="max-w-3xl">
-        <PageHeader back={{ to: '/app/agents', label: 'My agents' }} title="Deploy an agent" />
-        {notAllowed === 'adult'
-          ? <Callout tone="neutral" icon={<Bot />} title="Agents are for adults">Only adults (18+) and verified companies can deploy agents.</Callout>
-          : <Callout tone="warn" icon={<AlertTriangle />} title={notAllowed === 'company' ? 'Verify your business first' : 'Verify your identity first'} action={<Button size="sm" to={verifyTo}>{notAllowed === 'company' ? 'Verify business' : 'Verify ID'}</Button>}>
-              You’re accountable for everything your agent does, so only {notAllowed === 'company' ? 'verified companies' : 'ID-verified people'} can deploy one.
+        <PageHeader back={{ to: '/app/marketplace', label: 'Marketplace' }} title="Deploy an agent" />
+        {notAllowed === 'business'
+          ? <Callout tone="neutral" icon={<Bot />} title="Agents are deployed by registered businesses" action={<Button size="sm" to="/app/marketplace">Browse agents</Button>}>Businesses are accountable for what their agents do, so only verified companies can deploy one. You can hire agents from the marketplace.</Callout>
+          : <Callout tone="warn" icon={<AlertTriangle />} title="Verify your business first" action={<Button size="sm" to="/app/company/verify">Verify business</Button>}>
+              You’re accountable for everything your agent does, so only verified companies can deploy one.
             </Callout>}
       </div>
     )
@@ -220,7 +219,7 @@ export function DeployAgent() {
         )}
         {step === 2 && agent && (
           <div className="space-y-4">
-            <Callout tone="success" icon={<Check />}>@{agent.handle} is created. Connect it to go live.</Callout>
+            <Callout tone="brand" icon={<Check />}>@{agent.handle} is saved, but not listed yet. It appears in the marketplace and can be tagged or hired only once its webhook passes the test below.</Callout>
             <Field label="Webhook URL" hint="We send signed events: tag.created, comment.reply, order.created, order.revision_requested, order.cancelled, autoreply.comment.">
               <div className="flex gap-2"><Input icon={<Webhook />} value={url} onChange={(e) => setUrl(e.target.value)} /><Button variant="outline" loading={busy} disabled={!/^https:\/\/.+\..+/.test(url)} onClick={connect}>Save</Button></div>
             </Field>
@@ -252,7 +251,7 @@ export function DeployAgent() {
         <div className="mt-8 flex justify-between border-t border-line pt-5">
           <Button variant="ghost" disabled={step === 0 || step >= 2} onClick={() => setStep((s) => s - 1)}>Back</Button>
           {step === 0 && <Button disabled={!name || !/^[a-z0-9_]{3,30}$/.test(handle)} onClick={() => setStep(1)}>Continue</Button>}
-          {step === 1 && <Button loading={busy} disabled={!agree || !rates.some((r) => r.task.trim() && r.price > 0)} onClick={deploy}>Create agent</Button>}
+          {step === 1 && <Button loading={busy} disabled={!agree || !rates.some((r) => r.task.trim() && r.price > 0)} onClick={deploy}>Save and connect</Button>}
           {step === 2 && <Button disabled={test !== 'ok'} onClick={() => setStep(3)}>Go live</Button>}
           {step === 3 && <Button icon={<Zap className="size-4" />} onClick={() => nav(`/app/agents/${agent!.handle}`)}>Open agent</Button>}
         </div>

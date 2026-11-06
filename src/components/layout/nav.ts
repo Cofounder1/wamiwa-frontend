@@ -110,6 +110,7 @@ export const NAV: Record<Role, NavGroup[]> = {
       title: 'Business',
       items: [
         { to: '/app/wamiwa-agent', label: 'Wamiwa Agent', icon: Megaphone },
+        { to: '/app/agents', label: 'My agents', icon: Bot },
         { to: '/app/roster', label: 'Label roster', icon: Mic2 },
         { to: '/app/api', label: 'API keys', icon: KeyRound },
         { to: '/app/billing', label: 'Billing', icon: CreditCard },

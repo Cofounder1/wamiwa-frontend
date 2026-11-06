@@ -310,6 +310,9 @@ export function Subscription() {
   const sub = useApi((s) => api.get<SubDto>('/subscriptions', undefined, s), [])
   const plans = useApi((s) => api.get<Plans>('/subscriptions/plans', undefined, s), [])
   const method = useApi(() => paymentMethod(), [])
+  // SB-03: moving up from Creator costs only the difference for the days left; show that amount before paying.
+  const upgrade = useApi((sig) => api.get<{ amount_cents: number; until: string }>('/subscriptions/upgrade-quote', undefined, sig)
+    .catch(() => null), [sub.data?.tier, sub.data?.subscribed])
   const [cycle, setCycle] = useState<'monthly' | 'yearly'>('monthly')
   const [busy, setBusy] = useState<string | null>(null)
   if (sub.error) return <ErrorState error={sub.error} onRetry={sub.reload} />
@@ -343,7 +346,10 @@ export function Subscription() {
   const change = (tier: Tier) => run(tier, async (paid) => {
     const charged = tier === 'pro' && current !== 'pro'
     const payment_method = charged
-      ? await pay((await api.get<{ amount_cents: number }>('/subscriptions/upgrade-quote')).amount_cents, 'Upgrade to Pro for the rest of this period')
+      ? await (async () => {
+        const q = await api.get<{ amount_cents: number; until: string }>('/subscriptions/upgrade-quote')
+        return pay(q.amount_cents, `Upgrade to Pro: the difference for the days left until ${date(q.until)}`)
+      })()
       : 'not_charged'
     if (charged) paid()
     return api.patch('/subscriptions', { payment_method, tier })
@@ -390,7 +396,12 @@ export function Subscription() {
               <div className="mt-6">
                 {!current && <Button className="w-full" variant={tier === 'pro' ? 'primary' : 'outline'} loading={busy === tier} onClick={() => subscribe(tier)}>Subscribe to {t.name}</Button>}
                 {current && !isCurrent && !cancelled && (tier === 'pro'
-                  ? <Button className="w-full" loading={busy === tier} onClick={() => change('pro')}>Upgrade to Pro</Button>
+                  ? <>
+                      <Button className="w-full" loading={busy === tier} onClick={() => change('pro')}>
+                        {upgrade.data ? `Upgrade now · ${usd(upgrade.data.amount_cents / 100)}` : 'Upgrade to Pro'}
+                      </Button>
+                      {upgrade.data && <p className="mt-2 text-center text-[12px] opacity-70">You pay only the difference for the days left until {date(upgrade.data.until)}. Then {usd(price.usd_cents / 100)}/{period === 'monthly' ? 'month' : 'year'}.</p>}
+                    </>
                   : pending ? <Button className="w-full" variant="secondary" loading={busy === 'pro'} onClick={() => change('pro')}>Keep Pro instead</Button>
                     : <Button className="w-full" variant="outline" loading={busy === tier} onClick={() => change('standard')}>Switch to Creator at renewal</Button>)}
                 {isCurrent && cancelled && <Button className="w-full" variant={tier === 'pro' ? 'primary' : 'outline'} loading={busy === 'renew'} onClick={renew}>Renew · {usd(price.usd_cents / 100)}</Button>}

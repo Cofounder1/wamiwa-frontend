@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Building2, Check, CircleCheck, Crown, ImagePlus, Lock, Mic, ShieldCheck, Trash2, Upload, X } from 'lucide-react'
 import { api, mediaUrl, errMsg } from '@/api/client'
@@ -8,7 +8,7 @@ import type { ContractDto, ProfileDto } from '@/api/types'
 import { useSession } from '@/context/session'
 import { usd } from '@/lib/format'
 import { cn } from '@/lib/cn'
-import { Badge, Button, Callout, Card, CardHeader, Checkbox, Field, Input, Modal, PageHeader, Switch, toast } from '@/components/ui/primitives'
+import { Badge, Button, Callout, Card, CardHeader, Checkbox, Field, Input, Modal, PageHeader, Switch, Tabs, toast } from '@/components/ui/primitives'
 import { ErrorState, Spinner } from '@/components/ui/states'
 
 /** GET /likeness/pricing-guide: a follower-based cap, or (verified major people) a recommended [min, max] range. */
@@ -137,7 +137,7 @@ export default function Likeness() {
             ) : cap !== undefined && (
               <div className="mt-3 rounded-2xl bg-surface-2 p-4">
                 <div className="flex items-baseline justify-between"><span className="text-[12.5px] text-ink-2">Your image-only limit</span><span className="text-[24px] font-extrabold text-ink num">{usd(cap)}</span></div>
-                <div className="mt-2 text-[12px] leading-relaxed text-ink-2">$20 plus $10 per 1,000 human followers, adjusted for how much your human viewers engage. {guide.data?.note}</div>
+                <div className="mt-2 text-[12px] leading-relaxed text-ink-2">$50 plus $10 per 1,000 human followers, adjusted for how much your human viewers engage. {guide.data?.note}</div>
               </div>
             )}
             <div className="mt-4 space-y-3">
@@ -179,31 +179,110 @@ function PhotoUpload({ onClose, onDone }: { onClose: () => void; onDone: () => v
   )
 }
 
+const PROMPT = '“The best thing about Lagos in December is… and here’s my honest take after two weeks of trying it.”'
+const MIN_SECONDS = 30
+const MAX_SECONDS = 60
+
+function recorderType(): string | undefined {
+  if (typeof MediaRecorder === 'undefined') return undefined
+  return ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported(t))
+}
+
+/** LK-01: a voice clip, recorded here while reading the prompt, or uploaded. 30–60 seconds either way. */
 function VoiceUpload({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const canRecord = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && !!recorderType()
+  const [mode, setMode] = useState<'record' | 'upload'>(canRecord ? 'record' : 'upload')
   const [clip, setClip] = useState<File>()
   const [duration, setDuration] = useState(0)
   const [consent, setConsent] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [recording, setRecording] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  const [micError, setMicError] = useState<string>()
+  const recorder = useRef<MediaRecorder | null>(null)
+  const timer = useRef<number>()
+  const started = useRef(0)
+
+  useEffect(() => () => { window.clearInterval(timer.current); recorder.current?.stream.getTracks().forEach((t) => t.stop()) }, [])
+
   const pick = (f?: File) => {
-    setClip(f)
+    setClip(f); setDuration(0)
     if (!f) return
     const a = document.createElement('audio')
     a.preload = 'metadata'
     a.onloadedmetadata = () => setDuration(Math.round(a.duration || 0))
     a.src = URL.createObjectURL(f)
   }
+  const start = async () => {
+    setMicError(undefined); setClip(undefined); setDuration(0)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const type = recorderType()!
+      const rec = new MediaRecorder(stream, { mimeType: type })
+      const parts: Blob[] = []
+      rec.ondataavailable = (e) => { if (e.data.size) parts.push(e.data) }
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop())
+        const seconds = Math.round((Date.now() - started.current) / 1000)
+        const base = type.split(';')[0]
+        setClip(new File(parts, `voice-${Date.now()}.${base === 'audio/mp4' ? 'm4a' : 'weba'}`, { type: base }))
+        setDuration(seconds)
+        setRecording(false)
+        window.clearInterval(timer.current)
+      }
+      recorder.current = rec
+      started.current = Date.now()
+      setElapsed(0); setRecording(true)
+      rec.start()
+      timer.current = window.setInterval(() => {
+        const s = Math.floor((Date.now() - started.current) / 1000)
+        setElapsed(s)
+        if (s >= MAX_SECONDS) rec.stop()  // stop at the maximum
+      }, 250)
+    } catch {
+      setMicError('We couldn’t open your microphone. Allow microphone access, or upload a clip instead.')
+    }
+  }
+  const stop = () => recorder.current?.state === 'recording' && recorder.current.stop()
+
   const submit = async () => {
     setBusy(true)
     try {
-      await api.post('/likeness/assets/voice', { file_ref: await uploadFile('likeness_voice', clip!), duration_seconds: duration, recorded_in_app: true, voice_consent: consent })
+      await api.post('/likeness/assets/voice', { file_ref: await uploadFile('likeness_voice', clip!), duration_seconds: duration,
+        recorded_in_app: mode === 'record', voice_consent: consent })
       toast('Voice clip added'); onDone()
     } catch (e) { toast('Clip not added', errMsg(e), 'danger') } finally { setBusy(false) }
   }
+  const lengthOk = duration >= MIN_SECONDS && duration <= MAX_SECONDS
   return (
-    <Modal open onClose={onClose} size="sm" title="Add a voice clip" subtitle="Read the prompt aloud for 30–60 seconds." footer={<Button disabled={!clip || !consent} loading={busy} onClick={submit}>Add clip</Button>}>
-      <div className="rounded-2xl bg-surface-2 p-4 text-[14px] text-ink">“The best thing about Lagos in December is… and here’s my honest take after two weeks of trying it.”</div>
-      <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong py-5 text-[13px] text-ink-2 hover:border-brand"><Mic className="size-4" />{clip ? `${clip.name}${duration ? ` · ${duration}s` : ''}` : 'Record or choose a clip'}<input type="file" accept="audio/*" capture="user" className="sr-only" onChange={(e) => pick(e.target.files?.[0])} /></label>
-      {duration > 0 && (duration < 30 || duration > 60) && <p className="mt-2 text-[12.5px] text-danger">Clips must be 30–60 seconds.</p>}
+    <Modal open onClose={onClose} size="sm" title="Add a voice clip" subtitle="Read the prompt aloud for 30–60 seconds."
+      footer={<Button disabled={!clip || !consent || !lengthOk || recording} loading={busy} onClick={submit}>Add clip</Button>}>
+      <Tabs value={mode} onChange={(m) => { stop(); setMode(m); setClip(undefined); setDuration(0) }}
+        tabs={[{ value: 'record', label: 'Record now' }, { value: 'upload', label: 'Upload a file' }]} />
+      <div className="mt-4 rounded-2xl bg-surface-2 p-4 text-[14px] text-ink">{PROMPT}</div>
+      {mode === 'record' ? (
+        <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-line-strong py-5 text-[13px] text-ink-2">
+          {!canRecord && <span>This browser can’t record here. Use “Upload a file”, or another browser such as Chrome or Safari.</span>}
+          {canRecord && !recording && (
+            <Button variant={clip ? 'outline' : 'primary'} icon={<Mic className="size-4" />} onClick={start}>{clip ? 'Record again' : 'Start recording'}</Button>
+          )}
+          {recording && (
+            <>
+              <span className="flex items-center gap-2 font-semibold text-danger"><span className="size-2.5 animate-pulse rounded-full bg-danger" />Recording · {elapsed}s of {MAX_SECONDS}s</span>
+              <Button variant="outline" disabled={elapsed < MIN_SECONDS} onClick={stop}>{elapsed < MIN_SECONDS ? `Keep reading (${MIN_SECONDS - elapsed}s)` : 'Stop'}</Button>
+            </>
+          )}
+          {clip && !recording && <span>Recorded {duration}s{lengthOk ? '' : ' — too short, record again'}</span>}
+          {clip && !recording && <audio controls src={URL.createObjectURL(clip)} className="mt-1 w-full max-w-[280px]" />}
+          {micError && <span className="text-danger">{micError}</span>}
+        </div>
+      ) : (
+        <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong py-5 text-[13px] text-ink-2 hover:border-brand">
+          <Upload className="size-4" />{clip ? `${clip.name}${duration ? ` · ${duration}s` : ''}` : 'Choose an audio file (MP3, M4A, WAV)'}
+          <input type="file" accept="audio/mpeg,audio/mp4,audio/x-m4a,audio/wav,audio/webm" className="sr-only" onChange={(e) => pick(e.target.files?.[0])} />
+        </label>
+      )}
+      {mode === 'upload' && duration > 0 && !lengthOk && <p className="mt-2 text-[12.5px] text-danger">Clips must be 30–60 seconds.</p>}
       <div className="mt-4"><Checkbox checked={consent} onChange={setConsent}>I consent to my voice being used in likeness videos, only for scripts I approve. I can delete samples any time; that stops new use but not contracts I’ve already signed.</Checkbox></div>
     </Modal>
   )

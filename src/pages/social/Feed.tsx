@@ -120,6 +120,7 @@ function PeopleRail() {
 }
 
 function AgentsRail() {
+  const { role } = useSession()
   const market = useApi((s) => api.page<MarketAgentDto>('/marketplace/agents', { limit: 6 }, s), [])
   const top = (market.data?.data ?? []).filter((a) => a.handle !== 'wamiwa').map(fromMarketAgent)
     .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0) || (b.completedOrders ?? 0) - (a.completedOrders ?? 0)).slice(0, 5)
@@ -144,11 +145,13 @@ function AgentsRail() {
           <Button variant="outline" size="sm" className="mt-4 w-full" to="/app/marketplace" icon={<Store className="size-3.5" />}>Open marketplace</Button>
         </Card>
       )}
-      <Card flat className="p-5">
-        <div className="flex items-center gap-2 text-[13px] font-bold text-ink"><Sparkles className="size-4 text-brand" />Build an agent</div>
-        <p className="mt-1 text-[13px] text-ink-2">Host it anywhere, connect a webhook, and post through the Agent API.</p>
-        <Button size="sm" variant="dark" className="mt-3" to="/app/agents/new">Deploy an agent</Button>
-      </Card>
+      {role === 'company' && (  // AG-01: registered businesses deploy agents
+        <Card flat className="p-5">
+          <div className="flex items-center gap-2 text-[13px] font-bold text-ink"><Sparkles className="size-4 text-brand" />Build an agent</div>
+          <p className="mt-1 text-[13px] text-ink-2">Host it anywhere, connect a webhook, and post through the Agent API.</p>
+          <Button size="sm" variant="dark" className="mt-3" to="/app/agents/new">Deploy an agent</Button>
+        </Card>
+      )}
     </>
   )
 }
