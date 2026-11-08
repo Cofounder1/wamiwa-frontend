@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Bot, Check, Clapperboard, Download, Eye, Heart, Lightbulb, Lock, MessageCircle, ShieldCheck, Sparkles, Star, UserPlus } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Bot, Check, Clapperboard, Download, Eye, Heart, Lightbulb, Lock, MessageCircle, Play, RotateCcw, Send, Share2, ShieldCheck, Trash2, Sparkles, Star, UserPlus } from 'lucide-react'
 import { api, errMsg, mediaUrl } from '@/api/client'
 import { fromMarketAgent } from '@/api/adapt'
 import { useApi } from '@/api/hooks'
@@ -11,6 +11,7 @@ import { Avatar, Badge, Button, Callout, Card, CardHeader, Field, PageHeader, Pr
 import { ErrorState, Spinner } from '@/components/ui/states'
 import { SplitBar, TimeChart } from '@/components/charts/Charts'
 import { pay, REFUND_NOTE } from '@/components/payments/PaymentSheet'
+import { ShareVideo } from '@/components/social/ShareVideo'
 import { isCancelled, paymentMethod } from '@/api/payments'
 
 /* ── FD-06 + WA-08 Analytics ─────────────────────────────────────────────── */
@@ -125,11 +126,12 @@ export function PostIdeas() {
 
 interface Quote { tier: 'standard' | 'premium'; seconds: number; free_seconds_applied: number; plan_videos_applied: number; plan_videos_left_after?: number; price_cents: number; rate_cents_per_minute: number }
 interface VideoPlan { active: boolean; videos_left?: number; renews_at?: string; cancel_at_period_end?: boolean; terms: { price_cents: number; videos: number; minutes_per_video: number } }
-interface AiVideo { id: string; status: string; tier: string; seconds: number; script?: string; created_at: string; file?: string | null }
+interface AiVideo { id: string; status: string; tier: 'standard' | 'premium'; seconds: number; script?: string; created_at: string; file?: string | null; post_id?: string | null }
 
 export function AIVideo() {
-  const { role, me } = useSession()
+  const { role, me, meDto } = useSession()
   const [tier, setTier] = useState<'standard' | 'premium'>('standard')
+  const [voice, setVoice] = useState<'female' | 'male'>((meDto?.profile?.video_voice as 'female' | 'male' | null) ?? 'female')
   const [seconds, setSeconds] = useState(60)
   const [script, setScript] = useState('')
   const [busy, setBusy] = useState(false)
@@ -137,6 +139,14 @@ export function AIVideo() {
   const list = useApi((s) => api.get<AiVideo[]>('/ai-videos', undefined, s), [])
   const plan = useApi((s) => api.get<VideoPlan>('/ai-videos/plan', undefined, s), [])
   const [planBusy, setPlanBusy] = useState(false)
+  const formRef = useRef<HTMLDivElement>(null)
+  // While a video is being made, check on it every 15 seconds.
+  const working = (list.data ?? []).some((v) => v.status === 'processing')
+  useEffect(() => {
+    if (!working) return
+    const t = window.setInterval(list.reload, 15_000)
+    return () => window.clearInterval(t)
+  }, [working, list.reload])
   if (role === 'minor') return <Callout tone="neutral" icon={<Lock />} title="Not available">AI video is only available to under-18s inside a guardian-approved contract.</Callout>
 
   // The backend only makes video of your own face, matched to your verified ID; check before anyone pays.
@@ -150,7 +160,7 @@ export function AIVideo() {
       quote.setData(fresh)
       const payment_method = fresh.price_cents > 0 ? await pay(fresh.price_cents, `AI video · ${seconds}s ${tier}`) : null
       paid = !!payment_method
-      await api.post('/ai-videos', { script, seconds, tier, payment_method })
+      await api.post('/ai-videos', { script, seconds, tier, payment_method, voice })
       toast('Generating your video', 'Jobs over 10 minutes notify you when done. If it fails, you get a retry or an automatic refund.')
       setScript(''); list.reload(); quote.reload(); plan.reload()
     } catch (e) {
@@ -176,6 +186,12 @@ export function AIVideo() {
       if (!isCancelled(e)) toast('Couldn’t update the plan', paid ? `${errMsg(e)} ${REFUND_NOTE}` : errMsg(e), 'danger')
     } finally { setPlanBusy(false) }
   }
+  // Try again / make again: the same script, length and quality go back into the form, priced before paying.
+  const again = (v: AiVideo) => {
+    setScript(v.script ?? ''); setSeconds(Math.min(300, Math.max(15, Math.round(v.seconds / 15) * 15))); setTier(v.tier)
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    toast('Script added back', 'Check it, then press Generate.')
+  }
   const download = async (id: string) => {
     try {
       const r = await api.get<{ download: string }>(`/ai-videos/${id}/download`)
@@ -189,7 +205,11 @@ export function AIVideo() {
     <div>
       <PageHeader title="AI video" subtitle="Generate video of yourself from a script. Your own face only, matched to your verified ID." />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div ref={formRef} className="scroll-mt-24">
         <Card className="p-6">
+          <Field label="Voice" hint="Reads your script. Your likeness videos use the same voice.">
+            <Segmented value={voice} onChange={setVoice} options={[{ value: 'female', label: 'Female voice' }, { value: 'male', label: 'Male voice' }]} />
+          </Field>
           <Field label="Script" hint="Lip movement and expressions follow your words. Out-of-sync renders are redone free."><Textarea className="min-h-48" value={script} onChange={(e) => setScript(e.target.value)} maxLength={5000} placeholder="Hey everyone! Today I’m showing you three ways to wear one Ankara wrap skirt…" /></Field>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <div>
@@ -220,6 +240,7 @@ export function AIVideo() {
             </Callout>
           )}
         </Card>
+        </div>
         <div className="space-y-6">
         <Card className="p-5">
           <div className="flex items-center justify-between"><span className="text-[15px] font-bold text-ink">Video plan</span>{plan.data?.active && <Badge tone="teal">{plan.data.cancel_at_period_end ? `Ends ${date(plan.data.renews_at!)}` : `Renews ${date(plan.data.renews_at!)}`}</Badge>}</div>
@@ -239,13 +260,7 @@ export function AIVideo() {
         <Card>
           <CardHeader title="Your AI videos" subtitle="Labeled AI-generated on Wamiwa, watermarked when downloaded." />
           <ul className="mt-3 divide-y divide-line">
-            {(list.data ?? []).map((v) => (
-              <li key={v.id} className="flex items-center gap-3 px-5 py-3.5">
-                <span className="grid size-10 place-items-center rounded-xl bg-wash text-ink-2"><Clapperboard className="size-4" /></span>
-                <div className="min-w-0 flex-1"><div className="text-[14px] font-semibold text-ink capitalize">{v.tier} · {v.seconds}s</div><div className="text-[12px] text-ink-2">{date(v.created_at)} · {v.status}</div></div>
-                {v.status === 'ready' && <Button size="xs" variant="outline" icon={<Download className="size-3.5" />} onClick={() => download(v.id)}>Download</Button>}
-              </li>
-            ))}
+            {(list.data ?? []).map((v) => <VideoItem key={v.id} video={v} onAgain={again} onDownload={download} onPosted={list.reload} />)}
             {list.data && list.data.length === 0 && <li className="px-5 py-8 text-center text-[13px] text-ink-2">No videos yet.</li>}
           </ul>
         </Card>
@@ -255,29 +270,96 @@ export function AIVideo() {
   )
 }
 
+function VideoItem({ video: v, onAgain, onDownload, onPosted }: { video: AiVideo; onAgain: (v: AiVideo) => void; onDownload: (id: string) => void; onPosted: () => void }) {
+  const [open, setOpen] = useState<'preview' | 'post' | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const remove = async () => {
+    const note = v.post_id ? ' Your post that shows it stays up.' : ''
+    if (!window.confirm(`Delete this video? It can’t be undone.${note}`)) return
+    setDeleting(true)
+    try { await api.del(`/ai-videos/${v.id}`); toast('Video deleted'); onPosted() } catch (e) { toast('Couldn’t delete', errMsg(e), 'danger') } finally { setDeleting(false) }
+  }
+  const [caption, setCaption] = useState('')
+  const [posting, setPosting] = useState(false)
+  const ready = v.status === 'ready' && !!v.file
+  const post = async () => {
+    setPosting(true)
+    try {
+      await api.post('/posts', { type: 'video', text: caption.trim(), generated_video_id: v.id })
+      toast('Posted to your feed', 'It’s labeled AI-generated.')
+      setOpen(null); setCaption(''); onPosted()
+    } catch (e) { toast('Couldn’t post', errMsg(e), 'danger') } finally { setPosting(false) }
+  }
+  const status = { ready: 'Ready', processing: 'Being made…', failed: 'Failed · refunded' }[v.status] ?? v.status
+  return (
+    <li className="px-5 py-3.5">
+      <div className="flex items-center gap-3">
+        <span className="grid size-10 place-items-center rounded-xl bg-wash text-ink-2"><Clapperboard className="size-4" /></span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[14px] font-semibold text-ink capitalize">{v.tier} · {v.seconds}s</div>
+          <div className={cn('text-[12px]', v.status === 'failed' ? 'text-danger' : 'text-ink-2')}>{date(v.created_at)} · {status}</div>
+        </div>
+      </div>
+      {v.script && <p className="mt-2 line-clamp-2 text-[12.5px] text-ink-2">“{v.script}”</p>}
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {ready && <Button size="xs" variant={open === 'preview' ? 'primary' : 'outline'} icon={<Play className="size-3.5" />} onClick={() => setOpen(open === 'preview' ? null : 'preview')}>Preview</Button>}
+        {ready && (v.post_id
+          ? <Button size="xs" variant="outline" icon={<Check className="size-3.5" />} to={`/app/post/${v.post_id}`}>Posted · view</Button>
+          : <Button size="xs" variant={open === 'post' ? 'primary' : 'outline'} icon={<Send className="size-3.5" />} onClick={() => setOpen(open === 'post' ? null : 'post')}>Post to feed</Button>)}
+        {ready && <Button size="xs" variant="outline" icon={<Share2 className="size-3.5" />} onClick={() => setSharing(true)}>Share</Button>}
+        {ready && <Button size="xs" variant="outline" icon={<Download className="size-3.5" />} onClick={() => onDownload(v.id)}>Download</Button>}
+        {v.status !== 'processing' && v.script && <Button size="xs" variant="ghost" icon={<RotateCcw className="size-3.5" />} onClick={() => onAgain(v)}>{v.status === 'failed' ? 'Try again' : 'Make again'}</Button>}
+        {v.status !== 'processing' && <Button size="xs" variant="ghost" className="text-danger" loading={deleting} icon={<Trash2 className="size-3.5" />} onClick={remove}>Delete</Button>}
+      </div>
+      {ready && <ShareVideo open={sharing} onClose={() => setSharing(false)} file={v.file!} title="My Wamiwa video" />}
+      {ready && open === 'preview' && (
+        <video className="mt-3 w-full rounded-xl bg-black" src={mediaUrl(v.file)} controls playsInline preload="metadata" />
+      )}
+      {ready && open === 'post' && (
+        <div className="mt-3 space-y-2">
+          <video className="w-full rounded-xl bg-black" src={mediaUrl(v.file)} controls playsInline preload="metadata" />
+          <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} maxLength={5000} placeholder="Say something about it (optional)" />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11.5px] text-ink-3">Shown with an AI-generated label.</span>
+            <Button size="sm" loading={posting} icon={<Send className="size-3.5" />} onClick={post}>Post</Button>
+          </div>
+        </div>
+      )}
+    </li>
+  )
+}
+
 /* ── AG-05 Auto-reply agent ─────────────────────────────────────────────── */
 
 export function AutoReply() {
-  const { subscribed, role } = useSession()
+  const { subscribed, role, meDto, refreshMe } = useSession()
+  const saved = meDto?.profile?.auto_reply
   const agents = useApi((s) => api.page<MarketAgentDto>('/marketplace/agents', { limit: 20 }, s), [])
-  const [agentId, setAgentId] = useState('')
-  const [on, setOn] = useState(false)
+  const [agentId, setAgentId] = useState(saved?.agent_id ?? '')
+  const [on, setOn] = useState(!!saved?.enabled)
   const [busy, setBusy] = useState(false)
+  // Only agents on the marketplace can reply for you: a business's agent is listed once its webhook passes its test.
   const options = (agents.data?.data ?? []).filter((a) => a.handle !== 'wamiwa')
-  useEffect(() => { if (!agentId && options[0]) setAgentId(options[0].id) }, [options, agentId])
+  useEffect(() => { if (saved) { setOn(saved.enabled); if (saved.agent_id) setAgentId(saved.agent_id) } }, [saved?.enabled, saved?.agent_id])
+  useEffect(() => { if (!options.some((a) => a.id === agentId) && options[0] && !on) setAgentId(options[0].id) }, [options, agentId, on])
   if (role === 'minor') return <Callout tone="neutral" icon={<Lock />} title="Not available on minor accounts" />
   const apply = async (enabled: boolean) => {
     setBusy(true)
     try {
       await api.call('PUT', '/auto-reply', { query: { enabled, agent_id: enabled ? agentId : undefined } })
       setOn(enabled)
+      void refreshMe()
       toast(enabled ? 'Auto-replies on' : 'Auto-replies off', enabled ? 'Replies are labeled “Agent — replying for you”. You can delete any of them.' : undefined)
     } catch (e) { toast('Couldn’t update', errMsg(e), 'danger') } finally { setBusy(false) }
   }
+  const noAgents = agents.data && options.length === 0
   const chosen = options.find((a) => a.id === agentId)
   return (
     <div>
       <PageHeader title="Auto-reply agent" subtitle="An agent reads and replies to comments for you. Every reply is labeled “Agent — replying for @you”, and you can delete any of them." />
+      {noAgents && !on && <Callout className="mb-6" tone="neutral" icon={<Bot />} title="No agents take auto-reply work yet">Businesses’ agents appear here once they’re connected and pass their test. Check back soon.</Callout>}
+      {agents.error && <Callout className="mb-6" tone="danger" title="Couldn’t load agents" action={<Button size="sm" variant="outline" onClick={agents.reload}>Try again</Button>}>{errMsg(agents.error)}</Callout>}
       {!subscribed && <Callout className="mb-6" tone="brand" title="Auto-replies come with a subscription" action={<Button size="sm" to="/app/subscription">Subscribe</Button>}>If your subscription lapses, auto-replies stop. We’ll give you notice the day before.</Callout>}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <Card className="p-5">
@@ -285,7 +367,7 @@ export function AutoReply() {
             <Select value={agentId} onChange={(e) => setAgentId(e.target.value)} disabled={!subscribed}>{options.map((a) => <option key={a.id} value={a.id}>{a.name} · by {a.owner.name}</option>)}</Select>
           </Field>
           {chosen && <div className="mt-3 flex items-center gap-3 rounded-2xl bg-surface-2 p-3"><Avatar src={fromMarketAgent(chosen).avatar} name={chosen.name} kind="agent" size="sm" /><p className="text-[13px] text-ink-2">{chosen.description}</p></div>}
-          <div className="mt-4 border-t border-line pt-2"><Switch checked={on} disabled={!subscribed || busy || !agentId} onChange={apply} label="Reply to comments for me" description="Delete any reply from the comment itself." /></div>
+          <div className="mt-4 border-t border-line pt-2"><Switch checked={on} disabled={busy || (!on && (!subscribed || !agentId))} onChange={apply} label="Reply to comments for me" description="Delete any reply from the comment itself." /></div>
         </Card>
         <Card flat className="h-fit p-5">
           <h3 className="flex items-center gap-2 text-[14px] font-bold text-ink"><ShieldCheck className="size-4 text-brand" />Brand rules still apply</h3>

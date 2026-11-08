@@ -38,6 +38,8 @@ export interface MeDto {
     /** NT-01: the optional notification types and whether each is on. */
     notification_prefs?: Record<string, boolean>
     daily_digest?: boolean
+    auto_reply?: { enabled: boolean; agent_id: string | null }
+    video_voice?: 'female' | 'male' | null
     id_verified: boolean
     verified_creator: boolean
     verified_major_person: boolean

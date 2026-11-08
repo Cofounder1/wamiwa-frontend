@@ -301,6 +301,8 @@ function Bubble({ m, mine, onReport }: { m: Msg; mine: boolean; onReport: () => 
         <div className={cn('max-w-[78%] rounded-[20px] px-4 py-2.5 text-[14px] leading-relaxed', mine ? 'rounded-br-md bg-brand text-on-brand' : 'rounded-bl-md bg-surface text-ink ring-1 ring-line')}>
           {m.attachments?.map((a) => a.kind === 'image'
             ? <img key={a.ref} src={mediaUrl(a.ref)} alt="" className="mb-2 max-h-64 rounded-xl object-cover" />
+            : a.kind === 'video'
+            ? <video key={a.ref} src={mediaUrl(a.ref)} controls playsInline preload="metadata" className="mb-2 max-h-80 w-full rounded-xl bg-black" />
             : <a key={a.ref} href={mediaUrl(a.ref)} target="_blank" rel="noreferrer" className="mb-1 flex items-center gap-2 underline"><FileText className="size-4" />{a.kind} · {Math.ceil(a.size_bytes / 1024)} KB</a>)}
           {m.body && <span className="whitespace-pre-wrap">{m.body}</span>}
           <div className={cn('mt-1 flex items-center justify-end gap-1 text-[10.5px]', mine ? 'opacity-75' : 'text-ink-3')}>
