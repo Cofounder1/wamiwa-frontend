@@ -8,7 +8,7 @@ import { HOME, useSession } from '@/context/session'
 import { api, ApiError } from '@/api/client'
 import type { LoginDto } from '@/api/types'
 import { cn } from '@/lib/cn'
-import { Button, Callout, Checkbox, Chip, Field, Input, Textarea, toast } from '@/components/ui/primitives'
+import { Button, Callout, Checkbox, Chip, Field, Input, PasswordInput, Textarea, toast } from '@/components/ui/primitives'
 import { Logo } from '@/components/ui/Logo'
 import { unsplash as u } from '@/data/art'
 import { RegionSelect } from '@/components/ui/RegionPicker'
@@ -300,7 +300,7 @@ function AccountStep({ kind, email, signupToken, dob, onCreated }: {
         </Field>
         {kind === 'company' && <Field label="Category"><Input placeholder="Fashion" value={category} onChange={(e) => setCategory(e.target.value)} /></Field>}
         <Field label="Country" hint={kind === 'company' ? 'Where your business is based.' : 'Where you live. You can change it later.'}><RegionSelect value={region} onChange={setRegion} /></Field>
-        <Field label="Password" hint="At least 10 characters."><Input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={10} /></Field>
+        <Field label="Password" hint="At least 10 characters."><PasswordInput autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={10} /></Field>
         {error && <Callout tone="danger">{error}</Callout>}
         <Button type="submit" size="lg" className="w-full" loading={busy} disabled={!name || !handleOk || password.length < 10}>Create account</Button>
         {/* Terms 1.3: creating an account accepts the Terms. Links open in a new tab so the form isn't lost. */}

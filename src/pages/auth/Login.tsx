@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { KeyRound, Lock, Mail } from 'lucide-react'
 import { DEMO_PASSWORD, HOME, ROLES, useSession } from '@/context/session'
 import { ApiError } from '@/api/client'
-import { Button, Callout, Divider, Field, Input } from '@/components/ui/primitives'
+import { Button, Callout, Divider, Field, Input, PasswordInput } from '@/components/ui/primitives'
 import { AuthFrame, OtpInput, Pane } from './Signup'
 import { cn } from '@/lib/cn'
 
@@ -49,7 +49,7 @@ export default function Login() {
           {!needs2fa ? (
             <>
               <Field label="Email"><Input icon={<Mail />} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-              <Field label="Password"><Input icon={<Lock />} type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+              <Field label="Password"><PasswordInput icon={<Lock />} autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
               <div className="-mt-2 text-right"><Link to={`/reset-password${email ? `?email=${encodeURIComponent(email)}` : ''}`} className="text-[13px] font-semibold text-ink-2 hover:text-ink">Forgot password?</Link></div>
             </>
           ) : (

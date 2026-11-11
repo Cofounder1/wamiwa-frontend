@@ -4,7 +4,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
-import { Bot, Building2, Check, ChevronRight, Loader2, X } from 'lucide-react'
+import { Bot, Building2, Check, ChevronRight, Eye, EyeOff, Loader2, X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 /* ── Button ─────────────────────────────────────────────────────────────── */
@@ -203,6 +203,28 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
         {icon && <span className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-ink-3 [&>svg]:size-4">{icon}</span>}
         <input ref={ref} className={cn(fieldBase, 'h-11 w-full', icon && 'pl-10', suffix && 'pr-14', className)} {...rest} />
         {suffix && <span className="absolute top-1/2 right-3 -translate-y-1/2 text-[13px] text-ink-3">{suffix}</span>}
+      </div>
+    )
+  },
+)
+
+/** A password field with an eye button to show or hide what's typed. */
+export const PasswordInput = forwardRef<HTMLInputElement, Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { icon?: ReactNode }>(
+  function PasswordInput({ icon, ...rest }, ref) {
+    const [shown, setShown] = useState(false)
+    return (
+      <div className="relative">
+        <Input ref={ref} icon={icon} type={shown ? 'text' : 'password'} className="pr-12" autoCapitalize="none" autoCorrect="off" spellCheck={false} {...rest} />
+        <button
+          type="button"
+          onClick={() => setShown((v) => !v)}
+          aria-label={shown ? 'Hide password' : 'Show password'}
+          aria-pressed={shown}
+          title={shown ? 'Hide password' : 'Show password'}
+          className="absolute top-1/2 right-1.5 grid size-9 -translate-y-1/2 place-items-center rounded-full text-ink-3 transition hover:bg-wash hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+        >
+          {shown ? <EyeOff className="size-[18px]" /> : <Eye className="size-[18px]" />}
+        </button>
       </div>
     )
   },

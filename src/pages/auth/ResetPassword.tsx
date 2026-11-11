@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { KeyRound, Lock, Mail } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
-import { Button, Callout, Field, Input, toast } from '@/components/ui/primitives'
+import { Button, Callout, Field, Input, PasswordInput, toast } from '@/components/ui/primitives'
 import { AuthFrame, OtpInput, Pane } from './Signup'
 
 const errText = (e: unknown) => (e instanceof ApiError ? e.fieldMessage ?? e.message : 'Something went wrong. Try again.')
@@ -71,8 +71,8 @@ export default function ResetPassword() {
         <Pane icon={<Lock />} title="Choose a new password" sub={`Enter the code we sent to ${email.trim()} and a new password.`}>
           <form onSubmit={reset} className="space-y-4">
             <div><div className="mb-2 text-[13px] font-semibold text-ink">Reset code</div><OtpInput value={code} onChange={setCode} disabled={locked} /></div>
-            <Field label="New password" hint="At least 10 characters."><Input icon={<Lock />} type="password" autoComplete="new-password" minLength={10} maxLength={128} value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-            <Field label="Confirm new password"><Input icon={<Lock />} type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></Field>
+            <Field label="New password" hint="At least 10 characters."><PasswordInput icon={<Lock />} autoComplete="new-password" minLength={10} maxLength={128} value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+            <Field label="Confirm new password"><PasswordInput icon={<Lock />} autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></Field>
             {error && <Callout tone={locked ? 'warn' : 'danger'}>{error}</Callout>}
             <Button type="submit" size="lg" className="w-full" loading={busy} disabled={locked || code.length < 6 || password.length < 10 || !confirm}>Change password</Button>
             <button type="button" disabled={busy} className="w-full text-center text-[13px] font-semibold text-ink-2 hover:text-ink disabled:opacity-50" onClick={() => request()}>Send a new code</button>

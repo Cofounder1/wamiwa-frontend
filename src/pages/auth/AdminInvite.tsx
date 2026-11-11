@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AtSign, KeyRound, Lock, ShieldCheck, ShieldX, User } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
-import { Button, Callout, Field, Input, toast } from '@/components/ui/primitives'
+import { Button, Callout, Field, Input, PasswordInput, toast } from '@/components/ui/primitives'
 import { AuthFrame, OtpInput, Pane } from './Signup'
 
 interface AcceptDto { setup_token: string; totp_secret: string; otpauth_url: string; next_step?: string }
@@ -67,8 +67,8 @@ export default function AdminInvite() {
           <form onSubmit={accept} className="space-y-4">
             <Field label="Full name"><Input icon={<User />} autoComplete="name" maxLength={120} value={form.name} onChange={set('name')} /></Field>
             <Field label="Handle" hint="3 to 30 characters."><Input icon={<AtSign />} autoComplete="username" maxLength={30} value={form.handle} onChange={(e) => setForm((f) => ({ ...f, handle: e.target.value.replace(/^@/, '') }))} /></Field>
-            <Field label="Password" hint="At least 12 characters."><Input icon={<Lock />} type="password" autoComplete="new-password" minLength={12} maxLength={128} value={form.password} onChange={set('password')} /></Field>
-            <Field label="Confirm password"><Input icon={<Lock />} type="password" autoComplete="new-password" value={form.confirm} onChange={set('confirm')} /></Field>
+            <Field label="Password" hint="At least 12 characters."><PasswordInput icon={<Lock />} autoComplete="new-password" minLength={12} maxLength={128} value={form.password} onChange={set('password')} /></Field>
+            <Field label="Confirm password"><PasswordInput icon={<Lock />} autoComplete="new-password" value={form.confirm} onChange={set('confirm')} /></Field>
             {error && <Callout tone="danger">{error}</Callout>}
             <Button type="submit" size="lg" className="w-full" loading={busy}
               disabled={!form.name.trim() || form.handle.trim().length < 3 || form.password.length < 12 || !form.confirm}>Continue</Button>
